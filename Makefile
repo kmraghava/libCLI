@@ -21,7 +21,7 @@ DEFINES :=
 LDFLAGS :=
 
 # Other libraries
-LDLIBS := -ljansson
+LDLIBS := -ljansson -lkmrUtils
 
 # Includes
 includes := -Isrc

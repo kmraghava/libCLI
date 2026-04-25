@@ -47,13 +47,14 @@ extern "C" {
  *****************************************************************************/
 enum
 {
-    CLI_NODE_TYPE_KEYWORD,
-    CLI_NODE_TYPE_VALUE,
+    CLI_TOKEN_TYPE_KEYWORD,
+    CLI_TOKEN_TYPE_VALUE,
+    CLI_TOKEN_TYPE_PROMPT,
 
-    CLI_NODE_MAX_NUM_TYPES
+    CLI_NUM_TOKEN_TYPES
 };
 
-typedef struct cli_node_s    cli_node_t;
+typedef struct cli_token_s   cli_token_t;
 typedef struct cli_prompt_s  cli_prompt_t;
 typedef struct cli_context_s cli_context_t;
 
@@ -80,27 +81,27 @@ extern cli_context_t* cli_context_new (const char  *cfg_filename_p,
 extern cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
                                                   const char     *name_p);
 
-extern cli_node_t* cli_prompt_add_node (cli_context_t  *ctx_p,
-                                        cli_prompt_t   *prompt_p,
-                                        const char     *name_p,
-                                        const char     *desc_p,
-                                        int             type,
-                                        cli_cmd_f       cmd_valid);
+extern cli_token_t* cli_prompt_add_node (cli_context_t  *ctx_p,
+                                         cli_prompt_t   *prompt_p,
+                                         const char     *name_p,
+                                         const char     *desc_p,
+                                         int             type,
+                                         cli_cmd_f       cmd_valid);
                                         
-extern cli_node_t* cli_node_add_node (cli_context_t  *ctx_p,
-                                      cli_node_t     *parent_p,
-                                      const char     *name_p,
-                                      const char     *desc_p,
-                                      int             type,
-                                      cli_cmd_f       cmd_valid);
+extern cli_token_t* cli_node_add_node (cli_context_t  *ctx_p,
+                                       cli_token_t    *parent_p,
+                                       const char     *name_p,
+                                       const char     *desc_p,
+                                       int             type,
+                                       cli_cmd_f       cmd_valid);
 
 extern cli_prompt_t* cli_node_add_prompt (cli_context_t  *ctx_p,
-                                          cli_node_t     *parent_p,
+                                          cli_token_t    *parent_p,
                                           const char     *name_p);
 
 extern void cli_run (cli_context_t  *ctx_p);
 
-extern int cli_out (const char *fmt_p, ...);
+extern int cli_out (cli_context_t  *ctx_p, const char *fmt_p, ...);
 
 
 /*****************************************************************************

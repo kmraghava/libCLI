@@ -17,6 +17,7 @@
 #include "cli.h"
 #include <errno.h>
 #include "jansson.h"
+#include "kmrUtils/ctree.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,9 +34,11 @@
 /*****************************************************************************
    Local Types
 *****************************************************************************/
-struct cli_node_s
+struct cli_token_s
 {
     cli_context_t  *ctx_p;
+
+    ctree_node_t   *tnode_p;
 
     int             type;
     char           *name_p;     // Keyword or value template
@@ -43,15 +46,8 @@ struct cli_node_s
 
     cli_cmd_f       cli_cmd_cb;
 
-    cli_node_t     *parent_p;
-    cli_node_t     *next_p,
-                   *prev_p;
-    cli_node_t     *children_p;
-
     cli_prompt_t   *cprompt_p;
     cli_prompt_t   *pprompt_p;
-
-    int             level;
 };
 
 struct cli_prompt_s
@@ -60,8 +56,8 @@ struct cli_prompt_s
 
     char           *name_p;
 
-    cli_node_t     *parent_p;
-    cli_node_t     *root_nodes_p;
+    cli_token_t    *parent_p;
+    ctree_t        *cmd_tree_p;
 };
 
 struct cli_context_s
@@ -103,10 +99,18 @@ struct cli_context_s
 /*****************************************************************************
    Local Function Prototypes
 *****************************************************************************/
+static cli_prompt_t* cli_prompt_new (cli_context_t  *ctx_p,
+                                     cli_token_t    *parent_p,
+                                     const char     *name_p);
+static cli_prompt_t* cli_prompt_del (cli_prompt_t  *prompt_p);
+
+static bool cli_match_value_token (void *member_p, void *key_p);
+static bool cli_match_token       (void *member_p, void *key_p);
+
 static void cli_cmd_parse (cli_context_t  *ctx_p,
                            const char     *cmd_p);
 
-static void cli_out_help_q (cli_node_t  *nodes_p);
+static void cli_out_help_q (ctree_t  *cmd_tree_p);
 
 static void cli_out_prompt (cli_prompt_t  *prompt_p,
                             int            cmd_argc,
@@ -122,6 +126,116 @@ static void cli_start_ssh_server (cli_context_t  *ctx_p);
 *****************************************************************************/
 /*****************************************************************************
  *
+ *  NAME        : cli_prompt_new
+ *
+ *  DESCRIPTION : Create a new CLI prompt.
+ *
+ *  PARAMS      : ctx_p    - CLI context
+ *                parent_p - Parent token
+ *                name_p   - Prompt name
+ *
+ *  RETURNS     : New CLI prompt or NULL on failure
+ *
+ *****************************************************************************/
+static cli_prompt_t* cli_prompt_new (cli_context_t  *ctx_p,
+                                     cli_token_t    *parent_p,
+                                     const char     *name_p)
+{
+    cli_prompt_t  *prompt_p;
+
+    prompt_p = calloc(1, sizeof(cli_prompt_t));
+    if (!prompt_p)
+        return NULL;
+
+    prompt_p->ctx_p = ctx_p;
+    prompt_p->parent_p = parent_p;
+
+    prompt_p->cmd_tree_p = ctree_new(NULL);
+    if (!prompt_p->cmd_tree_p)
+        goto FATAL;
+
+    prompt_p->name_p = strdup(name_p);
+    if (!prompt_p->name_p)
+        goto FATAL;
+
+    return prompt_p;
+
+FATAL:
+    return cli_prompt_del(prompt_p);
+}
+
+/*****************************************************************************
+ *
+ *  NAME        : cli_prompt_del
+ *
+ *  DESCRIPTION : Delete a CLI prompt.
+ *
+ *  PARAMS      : prompt_p - Prompt to delete
+ *
+ *  RETURNS     : NULL
+ *
+ *****************************************************************************/
+static cli_prompt_t* cli_prompt_del (cli_prompt_t  *prompt_p)
+{
+    if (prompt_p)
+    {
+        if (prompt_p->cmd_tree_p)
+            ctree_del(prompt_p->cmd_tree_p);
+
+        if (prompt_p->name_p)
+            free(prompt_p->name_p);
+
+        free(prompt_p);
+    }
+
+    return NULL;
+}
+
+/*****************************************************************************
+ *
+ *  NAME        : cli_match_token
+ *
+ *  DESCRIPTION : Match CLI token with the given name.
+ *
+ *  PARAMS      : member_p - CLI token
+ *                key_p    - CLI token name to match
+ *
+ *  RETURNS     : true if equal
+ *                false otherwise
+ *
+ *****************************************************************************/
+static bool cli_match_token (void *member_p, void *key_p)
+{
+    cli_token_t  *token_p = member_p;
+    char         *name_p = key_p;
+
+    return (0 == strncmp(token_p->name_p, name_p, strlen(name_p)));
+}
+
+/*****************************************************************************
+ *
+ *  NAME        : cli_match_value_token
+ *
+ *  DESCRIPTION : Match CLI token with the given name.
+ *
+ *  PARAMS      : member_p - CLI token
+ *                key_p    - NULL
+ *
+ *  RETURNS     : true if member_p is a value token
+ *                false otherwise
+ *
+ *****************************************************************************/
+static bool cli_match_value_token (void *member_p, void *key_p)
+{
+    cli_token_t  *token_p = member_p;
+
+    (void)key_p;
+
+    return (CLI_TOKEN_TYPE_VALUE == token_p->type);
+}
+
+/*****************************************************************************
+ *
  *  NAME        : cli_cmd_parse
  *
  *  DESCRIPTION : Parse the given command and call registered callback.
@@ -135,14 +249,13 @@ static void cli_start_ssh_server (cli_context_t  *ctx_p);
 static void cli_cmd_parse (cli_context_t  *ctx_p,
                            const char     *in_cmd_p)
 {
-    char        *cmd_p;
-    char        *token_p,
-                *rem_cmd_p = NULL;
-    cli_node_t  *match_nodes_p = ctx_p->cur_prompt_p->root_nodes_p,
-                *last_nd_p,
-                *nd_p;
-    int          cmd_argc = 0;
-    char        *cmd_args[CLI_CMD_MAX_NUM_TOKENS];
+    char         *cmd_p;
+    char         *token_p,
+                 *rem_cmd_p = NULL;
+    ctree_t      *cmd_tree_p = ctx_p->cur_prompt_p->cmd_tree_p;
+    cli_token_t  *mtoken_p;
+    int           cmd_argc = 0;
+    char         *cmd_args[CLI_CMD_MAX_NUM_TOKENS];
 
     cmd_p = strdup(in_cmd_p);
     if (!cmd_p)
@@ -154,48 +267,37 @@ static void cli_cmd_parse (cli_context_t  *ctx_p,
         cmd_args[cmd_argc] = token_p;
         cmd_argc++;
 
-        last_nd_p = NULL;
+        mtoken_p = ctree_find(cmd_tree_p, -1, token_p, cli_match_token);
+        if (!mtoken_p)
+            mtoken_p = ctree_find(cmd_tree_p, -1, NULL, cli_match_value_token);
 
-        for (nd_p = match_nodes_p; nd_p != NULL; nd_p = nd_p->next_p)
+        if (!mtoken_p)
         {
-            if (nd_p->type == CLI_NODE_TYPE_VALUE)
-            {
-                last_nd_p = nd_p;
-            }
-            else if (0 == strcmp(nd_p->name_p, token_p))
-            {
-                last_nd_p = nd_p;
-                break;
-            }
-        }
-
-        if (!last_nd_p)
-        {
-            cli_out("Invalid command\n");
+            cli_out(ctx_p, "Invalid command\n");
             goto RETURN;
         }
 
-        match_nodes_p = last_nd_p->children_p;
+        cmd_tree_p = ctree_node_get_subtree(mtoken_p->tnode_p);
 
         token_p = strtok_r(NULL, " ", &rem_cmd_p);
     }
 
-    if (!last_nd_p)
+    if (!mtoken_p)
     {
         cli_out_prompt(ctx_p->cur_prompt_p, 0, NULL);
         goto RETURN;
     }
 
-    if (last_nd_p->cprompt_p)
+    if (mtoken_p->cprompt_p)
     {
-        ctx_p->cur_prompt_p = last_nd_p->cprompt_p;
+        ctx_p->cur_prompt_p = mtoken_p->cprompt_p;
 
         cli_out_prompt(ctx_p->cur_prompt_p, 0, NULL);
         goto RETURN;
     }
 
-    if (last_nd_p->cli_cmd_cb)
-        last_nd_p->cli_cmd_cb(ctx_p, cmd_argc, cmd_args);
+    if (mtoken_p->cli_cmd_cb)
+        mtoken_p->cli_cmd_cb(ctx_p, cmd_argc, cmd_args);
 
 RETURN:
     free(cmd_p);
@@ -218,18 +320,17 @@ RETURN:
 static void cli_cmd_help_q (cli_context_t  *ctx_p,
                             const char     *in_cmd_p)
 {
-    char        *cmd_p;
-    char        *token_p,
-                *rem_cmd_p = NULL;
-    cli_node_t  *match_nodes_p = ctx_p->cur_prompt_p->root_nodes_p,
-                *last_nd_p,
-                *nd_p;
+    char         *cmd_p;
+    char         *token_p,
+                 *rem_cmd_p = NULL;
+    ctree_t      *cmd_tree_p = ctx_p->cur_prompt_p->cmd_tree_p;
+    cli_token_t  *mtoken_p;
     int          cmd_argc = 0;
     char        *cmd_args[CLI_CMD_MAX_NUM_TOKENS];
 
     if (0 == strcmp(in_cmd_p, "?"))
     {
-        cli_out_help_q(match_nodes_p);
+        cli_out_help_q(cmd_tree_p);
         cli_out_prompt(ctx_p->cur_prompt_p, 0, NULL);
 
         return;
@@ -245,41 +346,31 @@ static void cli_cmd_help_q (cli_context_t  *ctx_p,
         cmd_args[cmd_argc] = token_p;
         cmd_argc++;
 
-        last_nd_p = NULL;
-
         if (0 == strcmp(token_p, "?"))
         {
             int  ii;
 
-            if (!match_nodes_p)
-                cli_out("\n\t<ENTER>\n\n");
+            if (!cmd_tree_p)
+                cli_out(ctx_p, "\n\t<ENTER>\n\n");
             else
-                cli_out_help_q(match_nodes_p);
+                cli_out_help_q(cmd_tree_p);
             cli_out_prompt(ctx_p->cur_prompt_p, cmd_argc - 1, cmd_args);
 
             goto RETURN;
         }
  
-        for (nd_p = match_nodes_p; nd_p != NULL; nd_p = nd_p->next_p)
-        {
-            if (nd_p->type == CLI_NODE_TYPE_VALUE)
-            {
-                last_nd_p = nd_p;
-            }
-            else if (0 == strcmp(nd_p->name_p, token_p))
-            {
-                last_nd_p = nd_p;
-                break;
-            }
-        }
+        mtoken_p = ctree_find(cmd_tree_p, -1, token_p, cli_match_token);
+        if (!mtoken_p)
+            mtoken_p = ctree_find(cmd_tree_p, -1, NULL, cli_match_value_token);
 
-        if (!last_nd_p)
+
+        if (!mtoken_p)
         {
-            cli_out("Invalid command\n");
+            cli_out(ctx_p, "Invalid command\n");
             goto RETURN;
         }
 
-        match_nodes_p = last_nd_p->children_p;
+        cmd_tree_p = ctree_node_get_subtree(mtoken_p->tnode_p);
 
         token_p = strtok_r(NULL, " ", &rem_cmd_p);
     }
@@ -296,28 +387,33 @@ RETURN:
  *
  *  DESCRIPTION : Prints next tokens and their description.
  *
- *  PARAMS      : nodes_p - Options for next token.
+ *  PARAMS      : cmd_tree_p - Options for next token.
  *
  *  RETURNS     : void
  *
  *****************************************************************************/
-static void cli_out_help_q (cli_node_t  *nodes_p)
+static void cli_out_help_q (ctree_t  *cmd_tree_p)
 {
-    cli_node_t  *nd_p;
-    int          max_len = 0,
-                 namelen;
+    ctree_node_t  *tnode_p;
+    cli_token_t   *token_p;
+    int            max_len = 0,
+                   namelen;
 
-    for (nd_p = nodes_p; nd_p != NULL; nd_p = nd_p->next_p)
+    for (tnode_p = ctree_first_node(cmd_tree_p); tnode_p != NULL; tnode_p = ctree_node_next(tnode_p))
     {
-        namelen = strlen(nd_p->name_p);
+        token_p = ctree_node_member(tnode_p);
+
+        namelen = strlen(token_p->name_p);
 
         if (namelen > max_len)
             max_len = namelen;
     }
 
-    for (nd_p = nodes_p; nd_p != NULL; nd_p = nd_p->next_p)
+    for (tnode_p = ctree_first_node(cmd_tree_p); tnode_p != NULL; tnode_p = ctree_node_next(tnode_p))
     {
-        cli_out("\t%-*s%s\n", namelen+4, nd_p->name_p, nd_p->desc_p);
+        token_p = ctree_node_member(tnode_p);
+
+        cli_out(token_p->ctx_p, "\t%-*s%s\n", namelen+4, token_p->name_p, token_p->desc_p);
     }
 }
 
@@ -339,14 +435,14 @@ static void cli_out_prompt (cli_prompt_t  *prompt_p,
                             int            cmd_argc,
                             char          *cmd_args[])
 {
-    cli_out("%s ", prompt_p->name_p);
+    cli_out(prompt_p->ctx_p, "%s ", prompt_p->name_p);
 
     if (cmd_argc)
     {
         int  ii;
 
         for (ii = 0; ii < cmd_argc; ii++)
-            cli_out("%s ", cmd_args[ii]);
+            cli_out(prompt_p->ctx_p, "%s ", cmd_args[ii]);
     }
 }
 
@@ -392,7 +488,6 @@ cli_context_t* cli_context_new (const char  *cfg_filename_p,
 
     char           *save_name_p = NULL,
                    *save_filename_p = NULL;
-    cli_prompt_t   *prompt_p = NULL;
     json_t         *cfg_jobj_p = NULL;
     FILE           *cfg_fl = NULL;
 
@@ -478,10 +573,6 @@ FATAL:
 cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
                                            const char     *name_p)
 {
-    cli_prompt_t  *prompt_p;
-
-    char          *save_name_p = NULL;
-
     if (   !ctx_p
         || !name_p
        )
@@ -489,29 +580,17 @@ cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
         return NULL;
     }
 
-    save_name_p = strdup(name_p);
-    if (!save_name_p)
-        return NULL;
+    ctx_p->root_prompt_p = cli_prompt_new(ctx_p, NULL, name_p);
+    ctx_p->cur_prompt_p = ctx_p->root_prompt_p;
 
-    prompt_p = calloc(1, sizeof(cli_prompt_t));
-    if (!prompt_p)
-    {
-        free(save_name_p);
-        return NULL;
-    }
-
-    prompt_p->ctx_p = ctx_p;
-    prompt_p->name_p = save_name_p;
-    ctx_p->root_prompt_p = prompt_p;
-
-    return prompt_p;
+    return ctx_p->root_prompt_p;
 }
 
 /*****************************************************************************
  *
  *  NAME        : cli_prompt_add_node
  *
- *  DESCRIPTION : Add a CLI node
+ *  DESCRIPTION : Add a CLI token
  *
  *  PARAMS      : ctx_p     - CLI context
  *                parent_p  - Parent CLI prompt
@@ -520,27 +599,27 @@ cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
  *                type      - KEYWORD or VALUE
  *                cmd_valid - Validation function
  *
- *  RETURNS     : CLI node that was added
+ *  RETURNS     : CLI token that was added
  *
  *****************************************************************************/
-cli_node_t* cli_prompt_add_node (cli_context_t  *ctx_p,
-                                 cli_prompt_t   *parent_p,
-                                 const char     *name_p,
-                                 const char     *desc_p,
-                                 int             type,
-                                 cli_cmd_f       cb)
+cli_token_t* cli_prompt_add_node (cli_context_t  *ctx_p,
+                                  cli_prompt_t   *parent_p,
+                                  const char     *name_p,
+                                  const char     *desc_p,
+                                  int             type,
+                                  cli_cmd_f       cb)
 {
-    cli_node_t  *nd_p;
+    cli_token_t  *token_p = NULL;
 
-    char        *save_name_p = NULL,
-                *save_desc_p = NULL;
+    char         *save_name_p = NULL,
+                 *save_desc_p = NULL;
 
     if (   !ctx_p
         || !parent_p
         || !name_p
         || !desc_p
         ||  type < 0
-        ||  type >= CLI_NODE_MAX_NUM_TYPES
+        ||  type >= CLI_NUM_TOKEN_TYPES
        )
     {
         return NULL;
@@ -555,31 +634,29 @@ cli_node_t* cli_prompt_add_node (cli_context_t  *ctx_p,
         goto FATAL;
     }
 
-    nd_p = calloc(1, sizeof(*nd_p));
-    if (!nd_p)
+    token_p = calloc(1, sizeof(*token_p));
+    if (!token_p)
         goto FATAL;
 
-    nd_p->ctx_p = ctx_p;
+    token_p->ctx_p = ctx_p;
 
-    nd_p->pprompt_p = parent_p;
+    token_p->pprompt_p = parent_p;
 
-    if (parent_p->root_nodes_p)
-    {
-        parent_p->root_nodes_p->prev_p = nd_p;
-        nd_p->next_p = parent_p->root_nodes_p;
-    }
-    parent_p->root_nodes_p = nd_p;
+    token_p->tnode_p = ctree_node_new(parent_p->cmd_tree_p, token_p);
+    if (!token_p->tnode_p)
+        goto FATAL;
 
-    nd_p->type = type;
-    nd_p->cli_cmd_cb = cb;
-    nd_p->name_p = save_name_p;
-    nd_p->desc_p = save_desc_p;
+    token_p->type = type;
+    token_p->cli_cmd_cb = cb;
+    token_p->name_p = save_name_p;
+    token_p->desc_p = save_desc_p;
 
-    return nd_p;
+    return token_p;
 
 FATAL:
     if (save_name_p)  free(save_name_p);
     if (save_desc_p)  free(save_desc_p);
+    if (token_p)      free(token_p);
 
     return NULL;
 }
@@ -588,36 +665,37 @@ FATAL:
  *
  *  NAME        : cli_node_add_node
  *
- *  DESCRIPTION : Add a CLI node
+ *  DESCRIPTION : Add a CLI token
  *
  *  PARAMS      : ctx_p     - CLI context
- *                parent_p  - Parent CLI node
+ *                parent_p  - Parent CLI token
  *                name_p    - Keyword or value name
  *                desc_p    - Description of this value or keyword
  *                type      - KEYWORD or VALUE
  *                cmd_valid - Validation function
  *
- *  RETURNS     : CLI node that was added
+ *  RETURNS     : CLI token that was added
  *
  *****************************************************************************/
-cli_node_t* cli_node_add_node (cli_context_t  *ctx_p,
-                               cli_node_t     *parent_p,
-                               const char     *name_p,
-                               const char     *desc_p,
-                               int             type,
-                               cli_cmd_f       cb)
+cli_token_t* cli_node_add_node (cli_context_t  *ctx_p,
+                                cli_token_t    *parent_p,
+                                const char     *name_p,
+                                const char     *desc_p,
+                                int             type,
+                                cli_cmd_f       cb)
 {
-    cli_node_t  *nd_p;
+    cli_token_t  *token_p = NULL;
 
-    char        *save_name_p = NULL,
-                *save_desc_p = NULL;
+    char         *save_name_p = NULL,
+                 *save_desc_p = NULL;
+    ctree_t      *ptree_p;
 
     if (   !ctx_p
         || !parent_p
         || !name_p
         || !desc_p
         ||  type < 0
-        ||  type >= CLI_NODE_MAX_NUM_TYPES
+        ||  type >= CLI_NUM_TOKEN_TYPES
        )
     {
         return NULL;
@@ -636,31 +714,35 @@ cli_node_t* cli_node_add_node (cli_context_t  *ctx_p,
         goto FATAL;
     }
 
-    nd_p = calloc(1, sizeof(*nd_p));
-    if (!nd_p)
+    token_p = calloc(1, sizeof(*token_p));
+    if (!token_p)
         goto FATAL;
 
-    nd_p->ctx_p = ctx_p;
+    token_p->ctx_p = ctx_p;
 
-    nd_p->parent_p = parent_p;
-
-    if (parent_p->children_p)
+    ptree_p = ctree_node_get_subtree(parent_p->tnode_p);
+    if (!ptree_p)
     {
-        parent_p->children_p->prev_p = nd_p;
-        nd_p->next_p = parent_p->children_p;
+        ptree_p = ctree_new(parent_p->tnode_p);
+        if (!ptree_p)
+            goto FATAL;
     }
-    parent_p->children_p = nd_p;
 
-    nd_p->type = type;
-    nd_p->cli_cmd_cb = cb;
-    nd_p->name_p = save_name_p;
-    nd_p->desc_p = save_desc_p;
+    token_p->tnode_p = ctree_node_new(ptree_p, token_p);
+    if (!token_p->tnode_p)
+        goto FATAL;
 
-    return nd_p;
+    token_p->type = type;
+    token_p->cli_cmd_cb = cb;
+    token_p->name_p = save_name_p;
+    token_p->desc_p = save_desc_p;
+
+    return token_p;
 
 FATAL:
     if (save_name_p)  free(save_name_p);
     if (save_desc_p)  free(save_desc_p);
+    if (token_p)      free(token_p);
 
     return NULL;
 }
@@ -672,20 +754,16 @@ FATAL:
  *  DESCRIPTION : Add a CLI prompt
  *
  *  PARAMS      : ctx_p     - CLI context
- *                parent_p  - Parent CLI node
+ *                parent_p  - Parent CLI token
  *                name_p    - Prompt name
  *
  *  RETURNS     : CLI prompt that was added
  *
  *****************************************************************************/
 cli_prompt_t* cli_node_add_prompt (cli_context_t  *ctx_p,
-                                   cli_node_t     *parent_p,
+                                   cli_token_t    *parent_p,
                                    const char     *name_p)
 {
-    cli_prompt_t  *prompt_p;
-
-    char          *save_name_p = NULL;
-
     if (   !ctx_p
         || !parent_p
        )
@@ -694,28 +772,15 @@ cli_prompt_t* cli_node_add_prompt (cli_context_t  *ctx_p,
     }
 
     /* A node having children cannot be extended to a prompt */
-    if (parent_p->children_p)
+    if (!ctree_node_is_leaf(parent_p->tnode_p))
         return NULL;
 
-    save_name_p = strdup(name_p);
-    if (!save_name_p)
-        return NULL;
+    if (parent_p->cprompt_p)
+        cli_prompt_del(parent_p->cprompt_p);
 
-    prompt_p = calloc(1, sizeof(cli_prompt_t));
-    if (!prompt_p)
-    {
-        free(save_name_p);
-        return NULL;
-    }
+    parent_p->cprompt_p = cli_prompt_new(ctx_p, parent_p, name_p);
 
-    prompt_p->ctx_p = ctx_p;
-
-    prompt_p->name_p = save_name_p;
-
-    parent_p->cprompt_p = prompt_p;
-    prompt_p->parent_p = parent_p;
-
-    return prompt_p;
+    return parent_p->cprompt_p;
 }
 
 /*****************************************************************************
@@ -759,7 +824,7 @@ void cli_run (cli_context_t  *ctx_p)
  *  RETURNS     : As same as printf
  *
  *****************************************************************************/
-int cli_out (const char *fmt_p, ...)
+int cli_out (cli_context_t *ctx_p, const char *fmt_p, ...)
 {
     int      nchars;
     va_list  args;
