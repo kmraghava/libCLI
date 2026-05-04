@@ -21,6 +21,7 @@ extern "C" {
 /*****************************************************************************
  * Include Files
  *****************************************************************************/
+#include "kmrUtils/logger.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -81,27 +82,25 @@ extern cli_context_t* cli_context_new (const char  *cfg_filename_p,
 extern cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
                                                   const char     *name_p);
 
-extern cli_token_t* cli_prompt_add_node (cli_context_t  *ctx_p,
-                                         cli_prompt_t   *prompt_p,
+extern cli_token_t* cli_prompt_add_token (cli_context_t  *ctx_p,
+                                          cli_prompt_t   *prompt_p,
+                                          const char     *name_p,
+                                          const char     *desc_p,
+                                          int             type,
+                                          cli_cmd_f       cmd_valid);
+                                        
+extern cli_token_t* cli_token_add_token (cli_context_t  *ctx_p,
+                                         cli_token_t    *parent_p,
                                          const char     *name_p,
                                          const char     *desc_p,
                                          int             type,
                                          cli_cmd_f       cmd_valid);
-                                        
-extern cli_token_t* cli_node_add_node (cli_context_t  *ctx_p,
-                                       cli_token_t    *parent_p,
-                                       const char     *name_p,
-                                       const char     *desc_p,
-                                       int             type,
-                                       cli_cmd_f       cmd_valid);
 
-extern cli_prompt_t* cli_node_add_prompt (cli_context_t  *ctx_p,
-                                          cli_token_t    *parent_p,
-                                          const char     *name_p);
+extern cli_prompt_t* cli_token_set_prompt (cli_context_t  *ctx_p,
+                                           cli_token_t    *parent_p,
+                                           const char     *name_p);
 
 extern void cli_run (cli_context_t  *ctx_p);
-
-extern int cli_out (cli_context_t  *ctx_p, const char *fmt_p, ...);
 
 
 /*****************************************************************************

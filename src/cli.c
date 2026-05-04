@@ -17,10 +17,13 @@
 #include "cli.h"
 #include <errno.h>
 #include "jansson.h"
-#include "kmrUtils/ctree.h"
+#include "kmrUtils/clist.h"
+#include "kmrUtils/tree.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 
 
 /*****************************************************************************
@@ -38,7 +41,7 @@ struct cli_token_s
 {
     cli_context_t  *ctx_p;
 
-    ctree_node_t   *tnode_p;
+    tree_node_t     tnode;
 
     int             type;
     char           *name_p;     // Keyword or value template
@@ -56,23 +59,37 @@ struct cli_prompt_s
 
     char           *name_p;
 
+    clist_t        *history_p;
+    char           *cur_cmd_p;
+
     cli_token_t    *parent_p;
-    ctree_t        *cmd_tree_p;
+    tree_t          cmd_tree;
 };
 
 struct cli_context_s
 {
-    cli_prompt_t  *root_prompt_p,
-                  *cur_prompt_p;
+    cli_prompt_t   *root_prompt_p,
+                   *cur_prompt_p;
 
-    char          *cfg_filename_p;
-    json_t        *cc_jobj_p;
+    char           *cfg_filename_p;
+    json_t         *cc_jobj_p;
 
-    bool           enable_telnet_b;
-    uint16_t       telnet_port;
+    bool            enable_telnet_b;
+    uint16_t        telnet_port;
 
-    bool           enable_ssh_b;
-    uint16_t       ssh_port;
+    bool            enable_ssh_b;
+    uint16_t        ssh_port;
+};
+
+enum
+{
+    CLI_KEY_ENTER,
+    CLI_KEY_Q,
+    CLI_KEY_TAB,
+    CLI_KEY_UP_ARROW,
+    CLI_KEY_DOWN_ARROW,
+
+    CLI_NUM_KEYS
 };
 
 
@@ -95,35 +112,106 @@ struct cli_context_s
         size == 0;              \
     })
 
+#define cli_out_clear_screen(ctx_p)  cli_out(ctx_p, "\r\033[H\033[J")
+#define cli_out_newline(ctx_p)       cli_out(ctx_p, "\n")
+
+#define cli_log(level, fmt_p, ...)                                                                                      \
+    do                                                                                                                  \
+    {                                                                                                                   \
+        logger_log_line(cli_logger(), __FILE__, __LINE__, __func__, NULL, level, "CLI", NULL, fmt_p, ##__VA_ARGS__);    \
+        logger_flush(cli_logger());                                                                                     \
+    }                                                                                                                   \
+    while (0)
+
 
 /*****************************************************************************
    Local Function Prototypes
 *****************************************************************************/
+static logger_t* cli_logger (void);
+static void log_stub (const char *line_p);
+
 static cli_prompt_t* cli_prompt_new (cli_context_t  *ctx_p,
                                      cli_token_t    *parent_p,
                                      const char     *name_p);
 static cli_prompt_t* cli_prompt_del (cli_prompt_t  *prompt_p);
 
-static bool cli_match_value_token (void *member_p, void *key_p);
-static bool cli_match_token       (void *member_p, void *key_p);
+static void cli_token_del (tree_node_t  *tnode_p);
+
+static bool cli_match_value_token (tree_node_t *tnode_p, void *key_p);
+static bool cli_match_token       (tree_node_t *tnode_p, void *key_p);
+
+static void cli_cmd_add_to_history (cli_prompt_t  *prompt_p,
+                                    const char    *cmd_p);
 
 static void cli_cmd_parse (cli_context_t  *ctx_p,
                            const char     *cmd_p);
 
-static void cli_out_help_q (ctree_t  *cmd_tree_p);
+static void cli_cmd_help_q (cli_context_t  *ctx_p,
+                            const char     *in_cmd_p);
+
+static void cli_out_help_q (tree_t  *cmd_tree_p);
+
+static void cli_cmd_help_tab (cli_context_t  *ctx_p,
+                              const char     *in_cmd_p);
 
 static void cli_out_prompt (cli_prompt_t  *prompt_p,
                             int            cmd_argc,
                             char          *cmd_args[]);
 
 static void cli_start_telnet_server (cli_context_t  *ctx_p);
+static void cli_stop_telnet_server  (cli_context_t  *ctx_p);
 
 static void cli_start_ssh_server (cli_context_t  *ctx_p);
+static void cli_stop_ssh_server  (cli_context_t  *ctx_p);
+
+static void cli_start (cli_context_t  *ctx_p);
+
+static int cli_get_input (cli_context_t  *ctx_p,
+                          char          **cmd_pp,
+                          size_t         *cmd_len_p);
+
+static int  cli_out (cli_context_t  *ctx_p, const char *fmt_p, ...);
+static char cli_in  (cli_context_t  *ctx_p);
 
 
 /*****************************************************************************
    Local Functions
 *****************************************************************************/
+static logger_t* cli_logger (void)
+{
+    static logger_t  *L_logger_p = NULL;
+
+    if (!L_logger_p)
+    {
+        L_logger_p = logger_create();
+        if (L_logger_p)
+        {
+            logger_set_filename(L_logger_p, "/tmp/cli.log");
+            logger_set_log_fn(L_logger_p, log_stub);
+        }
+    }
+
+    return L_logger_p;
+}
+
+
+/*****************************************************************************
+ *
+ *  NAME        : log_stub
+ *
+ *  DESCRIPTION : Stub function for logging.
+ *
+ *  PARAMS      : line_p - Line to be logged
+ *
+ *  RETURNS     : Nothing.
+ *
+ * NOTES        : We cannot log to stdout because CLI is running in the
+ *                foreground and reading input from stdin.
+ *                But, we are logging to a file.
+ *
+ *****************************************************************************/
+static void log_stub (const char *line_p) { (void)line_p; }
+
 /*****************************************************************************
  *
  *  NAME        : cli_prompt_new
@@ -150,12 +238,14 @@ static cli_prompt_t* cli_prompt_new (cli_context_t  *ctx_p,
     prompt_p->ctx_p = ctx_p;
     prompt_p->parent_p = parent_p;
 
-    prompt_p->cmd_tree_p = ctree_new(NULL);
-    if (!prompt_p->cmd_tree_p)
-        goto FATAL;
+    tree_init(prompt_p->cmd_tree, NULL);
 
     prompt_p->name_p = strdup(name_p);
     if (!prompt_p->name_p)
+        goto FATAL;
+
+    prompt_p->history_p = clist_new();
+    if (!prompt_p->history_p)
         goto FATAL;
 
     return prompt_p;
@@ -179,11 +269,15 @@ static cli_prompt_t* cli_prompt_del (cli_prompt_t  *prompt_p)
 {
     if (prompt_p)
     {
-        if (prompt_p->cmd_tree_p)
-            ctree_del(prompt_p->cmd_tree_p);
+        if (prompt_p->parent_p)
+            prompt_p->parent_p->cprompt_p = NULL;
+
+        tree_del(&prompt_p->cmd_tree, cli_token_del);
 
         if (prompt_p->name_p)
             free(prompt_p->name_p);
+
+        clist_del(prompt_p->history_p);
 
         free(prompt_p);
     }
@@ -193,20 +287,50 @@ static cli_prompt_t* cli_prompt_del (cli_prompt_t  *prompt_p)
 
 /*****************************************************************************
  *
+ *  NAME        : cli_token_del
+ *
+ *  DESCRIPTION : Delete a CLI token.
+ *
+ *  PARAMS      : tnode_p - Tree node of the Token to delete
+ *
+ *  RETURNS     : NULL
+ *
+ *****************************************************************************/
+static void cli_token_del (tree_node_t  *tnode_p)
+{
+    cli_token_t  *token_p = tree_get(tnode_p, cli_token_t, tnode);
+
+    if (token_p)
+    {
+        if (token_p->cprompt_p)
+            cli_prompt_del(token_p->cprompt_p);
+
+        if (token_p->name_p)
+            free(token_p->name_p);
+
+        if (token_p->desc_p)
+            free(token_p->desc_p);
+
+        free(token_p);
+    }
+}
+
+/*****************************************************************************
+ *
  *  NAME        : cli_match_token
  *
  *  DESCRIPTION : Match CLI token with the given name.
  *
- *  PARAMS      : member_p - CLI token
- *                key_p    - CLI token name to match
+ *  PARAMS      : tnode_p - Tree node containing the CLI token to match
+ *                key_p   - CLI token name to match
  *
  *  RETURNS     : true if equal
  *                false otherwise
  *
  *****************************************************************************/
-static bool cli_match_token (void *member_p, void *key_p)
+static bool cli_match_token (tree_node_t *tnode_p, void *key_p)
 {
-    cli_token_t  *token_p = member_p;
+    cli_token_t  *token_p = tree_get(tnode_p, cli_token_t, tnode);
     char         *name_p = key_p;
 
     return (0 == strncmp(token_p->name_p, name_p, strlen(name_p)));
@@ -225,13 +349,48 @@ static bool cli_match_token (void *member_p, void *key_p)
  *                false otherwise
  *
  *****************************************************************************/
-static bool cli_match_value_token (void *member_p, void *key_p)
+static bool cli_match_value_token (tree_node_t *tnode_p, void *key_p)
 {
-    cli_token_t  *token_p = member_p;
+    cli_token_t  *token_p = tree_get(tnode_p, cli_token_t, tnode);
 
     (void)key_p;
 
     return (CLI_TOKEN_TYPE_VALUE == token_p->type);
+}
+
+/*****************************************************************************
+ *
+ *  NAME        : cli_cmd_add_to_history
+ *
+ *  DESCRIPTION : Add command to history of the prompt.
+ *
+ *  PARAMS      : prompt_p - CLI prompt
+ *                cmd_p    - Command string to add to history
+ *
+ *  RETURNS     : void
+ *
+ *****************************************************************************/
+static void cli_cmd_add_to_history (cli_prompt_t  *prompt_p,
+                                    const char    *cmd_p)
+{
+    if (   prompt_p
+        && cmd_p
+       )
+    {
+        char *hist_cmd_p = strdup(cmd_p);
+        if (!hist_cmd_p)
+        {
+            cli_log(LOG_LEVEL_HIGH, "Alloc error: %s\n", strerror(errno));
+            return;
+        }
+
+        if (!clist_push_back(prompt_p->history_p, hist_cmd_p))
+        {
+            cli_log(LOG_LEVEL_HIGH, "Failed to add command to history\n");
+            free(hist_cmd_p);
+            return;
+        }
+    }
 }
 
 /*****************************************************************************
@@ -249,58 +408,72 @@ static bool cli_match_value_token (void *member_p, void *key_p)
 static void cli_cmd_parse (cli_context_t  *ctx_p,
                            const char     *in_cmd_p)
 {
-    char         *cmd_p;
-    char         *token_p,
+    char         *cmd_p = NULL;
+    char         *cmdtok_p,
                  *rem_cmd_p = NULL;
-    ctree_t      *cmd_tree_p = ctx_p->cur_prompt_p->cmd_tree_p;
-    cli_token_t  *mtoken_p;
+    tree_t       *cmd_tree_p = &ctx_p->cur_prompt_p->cmd_tree;
+    cli_token_t  *token_p = NULL;
     int           cmd_argc = 0;
     char         *cmd_args[CLI_CMD_MAX_NUM_TOKENS];
 
+    if (!in_cmd_p)
+        goto RETURN;
+
     cmd_p = strdup(in_cmd_p);
     if (!cmd_p)
-        return;
-
-    token_p = strtok_r(cmd_p, " ", &rem_cmd_p);
-    while (token_p)
     {
-        cmd_args[cmd_argc] = token_p;
+        cli_log(LOG_LEVEL_HIGH, "Alloc error: %s\n", strerror(errno));
+        return;
+    }
+
+    cmdtok_p = strtok_r(cmd_p, " ", &rem_cmd_p);
+    while (cmdtok_p)
+    {
+        cmd_args[cmd_argc] = cmdtok_p;
         cmd_argc++;
 
-        mtoken_p = ctree_find(cmd_tree_p, -1, token_p, cli_match_token);
-        if (!mtoken_p)
-            mtoken_p = ctree_find(cmd_tree_p, -1, NULL, cli_match_value_token);
+        token_p = tree_find(cmd_tree_p, 1, cmdtok_p, cli_match_token, cli_token_t, tnode);
+        if (!token_p)
+            token_p = tree_find(cmd_tree_p, 1, cmdtok_p, cli_match_value_token, cli_token_t, tnode);
 
-        if (!mtoken_p)
+        if (!token_p)
         {
-            cli_out(ctx_p, "Invalid command\n");
+            cli_out(ctx_p, "\nInvalid command\n\n");
             goto RETURN;
         }
 
-        cmd_tree_p = ctree_node_get_subtree(mtoken_p->tnode_p);
+        cmd_tree_p = &token_p->tnode.sub_tree;
 
-        token_p = strtok_r(NULL, " ", &rem_cmd_p);
+        cmdtok_p = strtok_r(NULL, " ", &rem_cmd_p);
     }
 
-    if (!mtoken_p)
+    if (!token_p)
+        goto RETURN;
+
+    if (token_p->cprompt_p)
     {
+        ctx_p->cur_prompt_p = token_p->cprompt_p;
+
         cli_out_prompt(ctx_p->cur_prompt_p, 0, NULL);
         goto RETURN;
     }
 
-    if (mtoken_p->cprompt_p)
+    if (!tree_node_is_leaf(token_p->tnode))
     {
-        ctx_p->cur_prompt_p = mtoken_p->cprompt_p;
-
-        cli_out_prompt(ctx_p->cur_prompt_p, 0, NULL);
+        cli_out(ctx_p, "\nIncomplete command\n\n");
         goto RETURN;
     }
 
-    if (mtoken_p->cli_cmd_cb)
-        mtoken_p->cli_cmd_cb(ctx_p, cmd_argc, cmd_args);
+    if (token_p->cli_cmd_cb)
+        token_p->cli_cmd_cb(ctx_p, cmd_argc, cmd_args);
+
+    cli_cmd_add_to_history(ctx_p->cur_prompt_p, in_cmd_p);
 
 RETURN:
-    free(cmd_p);
+    cli_out_prompt(ctx_p->cur_prompt_p, 0, NULL);
+
+    if (cmd_p)
+        free(cmd_p);
 
     return;
 }
@@ -320,63 +493,63 @@ RETURN:
 static void cli_cmd_help_q (cli_context_t  *ctx_p,
                             const char     *in_cmd_p)
 {
-    char         *cmd_p;
-    char         *token_p,
+    char         *cmd_p = NULL;
+    char         *cmdtok_p,
                  *rem_cmd_p = NULL;
-    ctree_t      *cmd_tree_p = ctx_p->cur_prompt_p->cmd_tree_p;
-    cli_token_t  *mtoken_p;
-    int          cmd_argc = 0;
-    char        *cmd_args[CLI_CMD_MAX_NUM_TOKENS];
+    tree_t       *cmd_tree_p = &ctx_p->cur_prompt_p->cmd_tree;
+    cli_token_t  *token_p = NULL;
+    int           cmd_argc = 0;
+    char         *cmd_args[CLI_CMD_MAX_NUM_TOKENS];
 
-    if (0 == strcmp(in_cmd_p, "?"))
+    cli_out_newline(ctx_p);
+
+    if (!in_cmd_p)
     {
         cli_out_help_q(cmd_tree_p);
-        cli_out_prompt(ctx_p->cur_prompt_p, 0, NULL);
-
-        return;
+        goto RETURN;
     }
 
     cmd_p = strdup(in_cmd_p);
     if (!cmd_p)
-        return;
-
-    token_p = strtok_r(cmd_p, " ", &rem_cmd_p);
-    while (token_p)
     {
-        cmd_args[cmd_argc] = token_p;
+        cli_log(LOG_LEVEL_HIGH, "Alloc error: %s\n", strerror(errno));
+        return;
+    }
+
+    cmdtok_p = strtok_r(cmd_p, " ", &rem_cmd_p);
+    while (   cmdtok_p
+           && strlen(cmdtok_p) > 0
+          )
+    {
+        cmd_args[cmd_argc] = cmdtok_p;
         cmd_argc++;
-
-        if (0 == strcmp(token_p, "?"))
-        {
-            int  ii;
-
-            if (!cmd_tree_p)
-                cli_out(ctx_p, "\n\t<ENTER>\n\n");
-            else
-                cli_out_help_q(cmd_tree_p);
-            cli_out_prompt(ctx_p->cur_prompt_p, cmd_argc - 1, cmd_args);
-
-            goto RETURN;
-        }
  
-        mtoken_p = ctree_find(cmd_tree_p, -1, token_p, cli_match_token);
-        if (!mtoken_p)
-            mtoken_p = ctree_find(cmd_tree_p, -1, NULL, cli_match_value_token);
+        token_p = tree_find(cmd_tree_p, 1, cmdtok_p, cli_match_token, cli_token_t, tnode);
+        if (!token_p)
+            token_p = tree_find(cmd_tree_p, 1, NULL, cli_match_value_token, cli_token_t, tnode);
 
-
-        if (!mtoken_p)
+        if (!token_p)
         {
             cli_out(ctx_p, "Invalid command\n");
             goto RETURN;
         }
 
-        cmd_tree_p = ctree_node_get_subtree(mtoken_p->tnode_p);
+        cmd_tree_p = &token_p->tnode.sub_tree;
 
-        token_p = strtok_r(NULL, " ", &rem_cmd_p);
+        cmdtok_p = strtok_r(NULL, " ", &rem_cmd_p);
     }
 
+    if (!cmd_tree_p)
+        cli_out(ctx_p, "\t<ENTER>\n");
+    else
+        cli_out_help_q(cmd_tree_p);
+
 RETURN:
-    free(cmd_p);
+    cli_out_newline(ctx_p);
+    cli_out_prompt(ctx_p->cur_prompt_p, cmd_argc, cmd_args);
+
+    if (cmd_p)
+        free(cmd_p);
 
     return;
 }
@@ -392,29 +565,43 @@ RETURN:
  *  RETURNS     : void
  *
  *****************************************************************************/
-static void cli_out_help_q (ctree_t  *cmd_tree_p)
+static void cli_out_help_q (tree_t  *cmd_tree_p)
 {
-    ctree_node_t  *tnode_p;
     cli_token_t   *token_p;
     int            max_len = 0,
                    namelen;
 
-    for (tnode_p = ctree_first_node(cmd_tree_p); tnode_p != NULL; tnode_p = ctree_node_next(tnode_p))
+    tree_foreach_member(*cmd_tree_p, cli_token_t, tnode, token_p)
     {
-        token_p = ctree_node_member(tnode_p);
-
         namelen = strlen(token_p->name_p);
 
         if (namelen > max_len)
             max_len = namelen;
     }
 
-    for (tnode_p = ctree_first_node(cmd_tree_p); tnode_p != NULL; tnode_p = ctree_node_next(tnode_p))
-    {
-        token_p = ctree_node_member(tnode_p);
-
+    tree_foreach_member(*cmd_tree_p, cli_token_t, tnode, token_p)
         cli_out(token_p->ctx_p, "\t%-*s%s\n", namelen+4, token_p->name_p, token_p->desc_p);
-    }
+}
+
+/*****************************************************************************
+ *
+ *  NAME        : cli_cmd_help_tab
+ *
+ *  DESCRIPTION : Auto-complete next token
+ *
+ *  PARAMS      : ctx_p    - CLI context
+ *                in_cmd_p - Command string
+ *
+ *  RETURNS     : void
+ *
+ *****************************************************************************/
+static void cli_cmd_help_tab (cli_context_t  *ctx_p,
+                              const char     *in_cmd_p)
+{
+    (void)ctx_p;
+    (void)in_cmd_p;
+
+    cli_out(ctx_p, "\nAuto-complete is not implemented yet\n");
 }
 
 /*****************************************************************************
@@ -435,18 +622,19 @@ static void cli_out_prompt (cli_prompt_t  *prompt_p,
                             int            cmd_argc,
                             char          *cmd_args[])
 {
-    cli_out(prompt_p->ctx_p, "%s ", prompt_p->name_p);
+    int  ii;
 
-    if (cmd_argc)
-    {
-        int  ii;
+    cli_out(prompt_p->ctx_p, "\r%s ", prompt_p->name_p);
 
-        for (ii = 0; ii < cmd_argc; ii++)
-            cli_out(prompt_p->ctx_p, "%s ", cmd_args[ii]);
-    }
+    for (ii = 0; ii < cmd_argc; ii++)
+        cli_out(prompt_p->ctx_p, "%s ", cmd_args[ii]);
 }
 
 static void cli_start_telnet_server (cli_context_t  *ctx_p)
+{
+}
+
+static void cli_stop_telnet_server (cli_context_t  *ctx_p)
 {
 }
 
@@ -454,9 +642,189 @@ static void cli_start_ssh_server (cli_context_t  *ctx_p)
 {
 }
 
+static void cli_stop_ssh_server (cli_context_t  *ctx_p)
+{
+}
+
 static void cli_start (cli_context_t  *ctx_p)
 {
+    char   *cmd_p = NULL;
+    size_t  cmd_len = 0;
+
+    cli_out_clear_screen(ctx_p);
     cli_out_prompt(ctx_p->root_prompt_p, 0, NULL);
+
+    while (true)
+    {
+        switch (cli_get_input(ctx_p, &cmd_p, &cmd_len))
+        {
+            case CLI_KEY_ENTER:
+            {
+                if (cmd_p)
+                    cli_log(LOG_LEVEL_LOW, "Received command: %s\n", cmd_p);
+
+                cli_cmd_parse(ctx_p, cmd_p);
+
+                free(cmd_p);
+                cmd_p = NULL;
+                cmd_len = 0;
+            }
+            break;
+
+            case CLI_KEY_Q:
+                cli_cmd_help_q(ctx_p, cmd_p);
+                break;
+
+            case CLI_KEY_TAB:
+                cli_cmd_help_tab(ctx_p, cmd_p);
+                break;
+
+            case CLI_KEY_UP_ARROW:
+            case CLI_KEY_DOWN_ARROW:
+                break;
+
+            default:
+                break;
+        }
+    }
+}
+
+static int cli_get_input (cli_context_t  *ctx_p,
+                          char          **cmd_pp,
+                          size_t         *cmd_len_p)
+{
+    int     last_key = CLI_KEY_ENTER;
+
+    char    cmd_buf[129];
+    int     ch,
+            ii;
+
+    memset(cmd_buf, '\0', sizeof(cmd_buf) - 1);
+    ii = 0;
+
+    while (true)
+    {
+        ch = cli_in(ctx_p);
+
+        if (ch == '\n')
+        {
+            cli_out(ctx_p, "%c", ch);
+            break;
+        }
+        else if (ch == '?')
+        {
+            last_key = CLI_KEY_Q;
+            cli_out(ctx_p, "%c\n", ch);
+            break;
+        }
+        else if (ch == '\t')
+        {
+            last_key = CLI_KEY_TAB;
+            break;
+        }
+        else if (ch == 27) // Escape character
+        {
+            ch = getchar();
+            if (ch == '[')
+            {
+                ch = getchar();
+                if (ch == 'A')
+                {
+                    last_key = CLI_KEY_UP_ARROW;
+                    break;
+                }
+                else if (ch == 'B')
+                {
+                    last_key = CLI_KEY_DOWN_ARROW;
+                    break;
+                }
+            }
+        }
+        else if (   (ch >= 'a' && ch <= 'z')
+                 || (ch >= 'A' && ch <= 'Z')
+                 || (ch >= '0' && ch <= '9')
+                 || ch == '-'
+                 || ch == '_'
+                 || ch == '.'
+                 || ch == ':'
+                 || ch == ' '
+                )
+        {
+            if (ii < (sizeof(cmd_buf) - 1))
+                cmd_buf[ii++] = ch;
+            else
+            {
+                *cmd_pp = realloc(*cmd_pp, (*cmd_len_p) + sizeof(cmd_buf));
+                strcpy(*cmd_pp + (*cmd_len_p), cmd_buf);
+                (*cmd_len_p) += (sizeof(cmd_buf) - 1);
+
+                memset(cmd_buf, '\0', sizeof(cmd_buf) - 1);
+                ii = 0;
+                cmd_buf[ii++] = ch;
+            }
+
+            cli_out(ctx_p, "%c", ch);
+        }
+    }
+
+    if (ii > 0)
+    {
+        *cmd_pp = realloc(*cmd_pp, (*cmd_len_p) + ii + 1);
+        strcpy(*cmd_pp + (*cmd_len_p), cmd_buf);
+        (*cmd_len_p) += ii;
+    }
+
+    return last_key;
+}
+
+/*****************************************************************************
+ *
+ *  NAME        : cli_out
+ *
+ *  DESCRIPTION : CLI printf
+ *
+ *  PARAMS      : ctx_p - CLI context
+ *                As same as printf
+ *
+ *  RETURNS     : As same as printf
+ *
+ *****************************************************************************/
+static int cli_out (cli_context_t *ctx_p, const char *fmt_p, ...)
+{
+    int      nchars;
+    va_list  args;
+
+    va_start(args, fmt_p);
+    nchars = vprintf(fmt_p, args);
+    va_end(args);
+
+    fflush(stdout);
+
+    return nchars;
+}
+
+/*****************************************************************************
+ *
+ *  NAME        : cli_in
+ *
+ *  DESCRIPTION : Reads a character from CLI input
+ *
+ *  PARAMS      : ctx_p - CLI context
+ *
+ *  RETURNS     : The character read
+ *
+ *****************************************************************************/
+static char cli_in (cli_context_t  *ctx_p)
+{
+    char  ch;
+
+    while (true)
+    {
+        if (read(STDIN_FILENO, &ch, 1) == 1)
+            break;
+    }
+
+    return ch;
 }
 
 
@@ -490,6 +858,7 @@ cli_context_t* cli_context_new (const char  *cfg_filename_p,
                    *save_filename_p = NULL;
     json_t         *cfg_jobj_p = NULL;
     FILE           *cfg_fl = NULL;
+    logger_t       *logger_p = NULL;
 
     if (!cfg_filename_p)
     {
@@ -588,7 +957,7 @@ cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
 
 /*****************************************************************************
  *
- *  NAME        : cli_prompt_add_node
+ *  NAME        : cli_prompt_add_token
  *
  *  DESCRIPTION : Add a CLI token
  *
@@ -602,12 +971,12 @@ cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
  *  RETURNS     : CLI token that was added
  *
  *****************************************************************************/
-cli_token_t* cli_prompt_add_node (cli_context_t  *ctx_p,
-                                  cli_prompt_t   *parent_p,
-                                  const char     *name_p,
-                                  const char     *desc_p,
-                                  int             type,
-                                  cli_cmd_f       cb)
+cli_token_t* cli_prompt_add_token (cli_context_t  *ctx_p,
+                                   cli_prompt_t   *parent_p,
+                                   const char     *name_p,
+                                   const char     *desc_p,
+                                   int             type,
+                                   cli_cmd_f       cb)
 {
     cli_token_t  *token_p = NULL;
 
@@ -642,9 +1011,8 @@ cli_token_t* cli_prompt_add_node (cli_context_t  *ctx_p,
 
     token_p->pprompt_p = parent_p;
 
-    token_p->tnode_p = ctree_node_new(parent_p->cmd_tree_p, token_p);
-    if (!token_p->tnode_p)
-        goto FATAL;
+    tree_node_init(token_p->tnode);
+    tree_add_node(parent_p->cmd_tree, token_p->tnode);
 
     token_p->type = type;
     token_p->cli_cmd_cb = cb;
@@ -663,7 +1031,7 @@ FATAL:
 
 /*****************************************************************************
  *
- *  NAME        : cli_node_add_node
+ *  NAME        : cli_token_add_token
  *
  *  DESCRIPTION : Add a CLI token
  *
@@ -677,18 +1045,17 @@ FATAL:
  *  RETURNS     : CLI token that was added
  *
  *****************************************************************************/
-cli_token_t* cli_node_add_node (cli_context_t  *ctx_p,
-                                cli_token_t    *parent_p,
-                                const char     *name_p,
-                                const char     *desc_p,
-                                int             type,
-                                cli_cmd_f       cb)
+cli_token_t* cli_token_add_token (cli_context_t  *ctx_p,
+                                  cli_token_t    *parent_p,
+                                  const char     *name_p,
+                                  const char     *desc_p,
+                                  int             type,
+                                  cli_cmd_f       cb)
 {
     cli_token_t  *token_p = NULL;
 
     char         *save_name_p = NULL,
                  *save_desc_p = NULL;
-    ctree_t      *ptree_p;
 
     if (   !ctx_p
         || !parent_p
@@ -720,17 +1087,8 @@ cli_token_t* cli_node_add_node (cli_context_t  *ctx_p,
 
     token_p->ctx_p = ctx_p;
 
-    ptree_p = ctree_node_get_subtree(parent_p->tnode_p);
-    if (!ptree_p)
-    {
-        ptree_p = ctree_new(parent_p->tnode_p);
-        if (!ptree_p)
-            goto FATAL;
-    }
-
-    token_p->tnode_p = ctree_node_new(ptree_p, token_p);
-    if (!token_p->tnode_p)
-        goto FATAL;
+    tree_node_init(token_p->tnode);
+    tree_add_node(parent_p->tnode.sub_tree, token_p->tnode);
 
     token_p->type = type;
     token_p->cli_cmd_cb = cb;
@@ -749,9 +1107,9 @@ FATAL:
 
 /*****************************************************************************
  *
- *  NAME        : cli_node_add_prompt
+ *  NAME        : cli_token_set_prompt
  *
- *  DESCRIPTION : Add a CLI prompt
+ *  DESCRIPTION : Set a CLI prompt
  *
  *  PARAMS      : ctx_p     - CLI context
  *                parent_p  - Parent CLI token
@@ -760,9 +1118,9 @@ FATAL:
  *  RETURNS     : CLI prompt that was added
  *
  *****************************************************************************/
-cli_prompt_t* cli_node_add_prompt (cli_context_t  *ctx_p,
-                                   cli_token_t    *parent_p,
-                                   const char     *name_p)
+cli_prompt_t* cli_token_set_prompt (cli_context_t  *ctx_p,
+                                    cli_token_t    *parent_p,
+                                    const char     *name_p)
 {
     if (   !ctx_p
         || !parent_p
@@ -772,7 +1130,7 @@ cli_prompt_t* cli_node_add_prompt (cli_context_t  *ctx_p,
     }
 
     /* A node having children cannot be extended to a prompt */
-    if (!ctree_node_is_leaf(parent_p->tnode_p))
+    if (!tree_node_is_leaf(parent_p->tnode))
         return NULL;
 
     if (parent_p->cprompt_p)
@@ -799,6 +1157,9 @@ void cli_run (cli_context_t  *ctx_p)
     if (!ctx_p)
         return;
 
+    if (!cli_logger())
+        return;
+
     if (ctx_p->enable_telnet_b)
         cli_start_telnet_server(ctx_p);
 
@@ -809,31 +1170,27 @@ void cli_run (cli_context_t  *ctx_p)
         && !ctx_p->enable_ssh_b
        )
     {
+        struct termios  orig_termios,
+                        raw_termios;
+
+        cli_log(LOG_LEVEL_HIGH, "Starting CLI in interactive mode\n");
+
+        // Get the original terminal settings
+        tcgetattr(STDIN_FILENO, &orig_termios);
+        raw_termios = orig_termios;
+
+        // Set the terminal to raw mode
+        raw_termios.c_lflag &= ~(ECHO | ICANON);
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios);
+
         cli_start(ctx_p);
+
+        // Restore the original terminal settings before exiting
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
     }
-}
-
-/*****************************************************************************
- *
- *  NAME        : cli_out
- *
- *  DESCRIPTION : CLI printf
- *
- *  PARAMS      : As same as printf
- *
- *  RETURNS     : As same as printf
- *
- *****************************************************************************/
-int cli_out (cli_context_t *ctx_p, const char *fmt_p, ...)
-{
-    int      nchars;
-    va_list  args;
-
-    va_start(args, fmt_p);
-    nchars = vprintf(fmt_p, args);
-    va_end(args);
-
-    return nchars;
+    else
+    {
+    }
 }
 
 
