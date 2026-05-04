@@ -123,6 +123,12 @@ enum
     }                                                                                                                   \
     while (0)
 
+#define cli_tree_find_token(t, depth, key_p, member_match_fn)                   \
+    ({                                                                          \
+        tree_node_t *__tnp = tree_find_node(t, depth, key_p, member_match_fn);  \
+        __tnp ? tree_get(__tnp, cli_token_t, tnode) : NULL;                     \
+    })
+
 
 /*****************************************************************************
    Local Function Prototypes
@@ -432,9 +438,9 @@ static void cli_cmd_parse (cli_context_t  *ctx_p,
         cmd_args[cmd_argc] = cmdtok_p;
         cmd_argc++;
 
-        token_p = tree_find(cmd_tree_p, 1, cmdtok_p, cli_match_token, cli_token_t, tnode);
+        token_p = cli_tree_find_token(cmd_tree_p, 1, cmdtok_p, cli_match_token);
         if (!token_p)
-            token_p = tree_find(cmd_tree_p, 1, cmdtok_p, cli_match_value_token, cli_token_t, tnode);
+            token_p = cli_tree_find_token(cmd_tree_p, 1, NULL, cli_match_value_token);
 
         if (!token_p)
         {
@@ -524,9 +530,9 @@ static void cli_cmd_help_q (cli_context_t  *ctx_p,
         cmd_args[cmd_argc] = cmdtok_p;
         cmd_argc++;
  
-        token_p = tree_find(cmd_tree_p, 1, cmdtok_p, cli_match_token, cli_token_t, tnode);
+        token_p = cli_tree_find_token(cmd_tree_p, 1, cmdtok_p, cli_match_token);
         if (!token_p)
-            token_p = tree_find(cmd_tree_p, 1, NULL, cli_match_value_token, cli_token_t, tnode);
+            token_p = cli_tree_find_token(cmd_tree_p, 1, NULL, cli_match_value_token);
 
         if (!token_p)
         {
@@ -539,7 +545,7 @@ static void cli_cmd_help_q (cli_context_t  *ctx_p,
         cmdtok_p = strtok_r(NULL, " ", &rem_cmd_p);
     }
 
-    if (!cmd_tree_p)
+    if (list_empty(cmd_tree_p->nodes))
         cli_out(ctx_p, "\t<ENTER>\n");
     else
         cli_out_help_q(cmd_tree_p);
