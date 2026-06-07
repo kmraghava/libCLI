@@ -158,7 +158,8 @@ static void cli_cmd_help_q (cli_context_t  *ctx_p,
 static void cli_out_help_q (tree_t  *cmd_tree_p);
 
 static void cli_cmd_help_tab (cli_context_t  *ctx_p,
-                              const char     *in_cmd_p);
+                              char          **in_cmd_pp,
+                              size_t         *in_cmd_len_p);
 
 static void cli_out_prompt (cli_prompt_t  *prompt_p,
                             int            cmd_argc,
@@ -595,19 +596,103 @@ static void cli_out_help_q (tree_t  *cmd_tree_p)
  *
  *  DESCRIPTION : Auto-complete next token
  *
- *  PARAMS      : ctx_p    - CLI context
- *                in_cmd_p - Command string
+ *  PARAMS      : ctx_p        - CLI context
+ *                in_cmd_pp    - Command string
+ *                in_cmd_len_p - Length of the command string
  *
  *  RETURNS     : void
  *
  *****************************************************************************/
 static void cli_cmd_help_tab (cli_context_t  *ctx_p,
-                              const char     *in_cmd_p)
+                              char          **in_cmd_pp,
+                              size_t         *in_cmd_len_p)
 {
-    (void)ctx_p;
-    (void)in_cmd_p;
+    char         *in_cmd_p = *in_cmd_pp;
+    char         *cmd_p = NULL;
+    char         *cmdtok_p,
+                 *rem_cmd_p = NULL;
+    tree_t       *cmd_tree_p = &ctx_p->cur_prompt_p->cmd_tree;
+    cli_token_t  *token_p = NULL;
+    int           cmd_argc = 0;
+    char         *cmd_args[CLI_CMD_MAX_NUM_TOKENS];
 
-    cli_out(ctx_p, "\nAuto-complete is not implemented yet\n");
+    if (!in_cmd_p)
+    {
+        token_p = tree_first_member(*cmd_tree_p, cli_token_t, tnode);
+        if (token_p)
+        {
+            size_t  name_len = strlen(token_p->name_p);
+
+            cli_out(ctx_p, "%s ", token_p->name_p);
+            
+            *in_cmd_pp = malloc(name_len + 1 + 1);
+            if (*in_cmd_pp)
+            {
+                sprintf(*in_cmd_pp, "%s ", token_p->name_p);
+                *in_cmd_len_p = name_len + 1;
+            }
+            else
+            {
+                cli_log(LOG_LEVEL_HIGH, "Alloc error: %s\n", strerror(errno));
+            }
+        }
+
+        return;
+    }
+
+    cmd_p = strdup(in_cmd_p);
+    if (!cmd_p)
+    {
+        cli_log(LOG_LEVEL_HIGH, "Alloc error: %s\n", strerror(errno));
+        return;
+    }
+
+    printf("in_cmd_p: |%s|\n", in_cmd_p);
+
+    cmdtok_p = strtok_r(cmd_p, " ", &rem_cmd_p);
+    while (   cmdtok_p
+           && strlen(cmdtok_p) > 0
+          )
+    {
+        cmd_args[cmd_argc] = cmdtok_p;
+        cmd_argc++;
+ 
+        token_p = cli_tree_find_token(cmd_tree_p, 1, cmdtok_p, cli_match_token);
+        if (!token_p)
+        {
+            cli_out(ctx_p, "Invalid command\n");
+            goto RETURN;
+        }
+
+        cmd_tree_p = &token_p->tnode.sub_tree;
+
+        cmdtok_p = strtok_r(NULL, " ", &rem_cmd_p);
+    }
+
+    if (token_p)
+    {
+        size_t   name_len = strlen(token_p->name_p);
+
+        cli_out(ctx_p, "%s ", token_p->name_p);
+        
+        in_cmd_p = realloc(*in_cmd_pp, *in_cmd_len_p + name_len + 1 + 1);
+        if (in_cmd_p)
+        {
+            *in_cmd_pp = in_cmd_p;
+            sprintf(*in_cmd_pp + *in_cmd_len_p, "%s ", token_p->name_p);
+            (*in_cmd_len_p) += (name_len + 1);
+        }
+        else
+        {
+            cli_log(LOG_LEVEL_HIGH, "Alloc error: %s\n", strerror(errno));
+        }
+    }
+
+RETURN:
+    if (cmd_p)
+        free(cmd_p);
+
+    return;
 }
 
 /*****************************************************************************
@@ -682,7 +767,7 @@ static void cli_start (cli_context_t  *ctx_p)
                 break;
 
             case CLI_KEY_TAB:
-                cli_cmd_help_tab(ctx_p, cmd_p);
+                cli_cmd_help_tab(ctx_p, &cmd_p, &cmd_len);
                 break;
 
             case CLI_KEY_UP_ARROW:
