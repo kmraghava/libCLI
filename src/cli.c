@@ -524,9 +524,7 @@ static void cli_cmd_help_q (cli_context_t  *ctx_p,
     }
 
     cmdtok_p = strtok_r(cmd_p, " ", &rem_cmd_p);
-    while (   cmdtok_p
-           && strlen(cmdtok_p) > 0
-          )
+    while (cmdtok_p)
     {
         cmd_args[cmd_argc] = cmdtok_p;
         cmd_argc++;
@@ -647,12 +645,8 @@ static void cli_cmd_help_tab (cli_context_t  *ctx_p,
         return;
     }
 
-    printf("in_cmd_p: |%s|\n", in_cmd_p);
-
     cmdtok_p = strtok_r(cmd_p, " ", &rem_cmd_p);
-    while (   cmdtok_p
-           && strlen(cmdtok_p) > 0
-          )
+    while (cmdtok_p)
     {
         cmd_args[cmd_argc] = cmdtok_p;
         cmd_argc++;
@@ -671,21 +665,23 @@ static void cli_cmd_help_tab (cli_context_t  *ctx_p,
 
     if (token_p)
     {
-        size_t   name_len = strlen(token_p->name_p);
+        size_t   last_token_len = strlen(cmd_args[cmd_argc-1]),
+                 name_len = strlen(token_p->name_p);
 
-        cli_out(ctx_p, "%s ", token_p->name_p);
-        
-        in_cmd_p = realloc(*in_cmd_pp, *in_cmd_len_p + name_len + 1 + 1);
+        in_cmd_p = realloc(*in_cmd_pp, *in_cmd_len_p + name_len - last_token_len + 1 + 1);
         if (in_cmd_p)
         {
             *in_cmd_pp = in_cmd_p;
-            sprintf(*in_cmd_pp + *in_cmd_len_p, "%s ", token_p->name_p);
-            (*in_cmd_len_p) += (name_len + 1);
+            (*in_cmd_len_p) += sprintf(*in_cmd_pp + *in_cmd_len_p, "%s ", token_p->name_p + last_token_len);
         }
         else
         {
             cli_log(LOG_LEVEL_HIGH, "Alloc error: %s\n", strerror(errno));
+            goto RETURN;
         }
+
+        cmd_args[cmd_argc-1] = token_p->name_p;
+        cli_out_prompt(ctx_p->cur_prompt_p, cmd_argc, cmd_args);
     }
 
 RETURN:
@@ -790,7 +786,7 @@ static int cli_get_input (cli_context_t  *ctx_p,
     int     ch,
             ii;
 
-    memset(cmd_buf, '\0', sizeof(cmd_buf) - 1);
+    memset(cmd_buf, '\0', sizeof(cmd_buf));
     ii = 0;
 
     while (true)

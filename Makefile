@@ -12,7 +12,7 @@ src_dir := src
 build_dir := build
 
 # Compiler flags
-CFLAGS :=
+CFLAGS := -Wall -Wextra -g
 
 # Defines
 DEFINES :=
