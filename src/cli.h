@@ -22,6 +22,7 @@ extern "C" {
  * Include Files
  *****************************************************************************/
 #include "kmrUtils/logger.h"
+#include "kmrUtils/str.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -33,15 +34,6 @@ extern "C" {
 /*****************************************************************************
  * Global Constants
  *****************************************************************************/
-/* The constant is conventionally chosen. It can be tuned.
- * For example the command "ipv6 address <prefix/prefix-length> has two
- * keywords and 1 value; thus 3 tokens.
- *
- * This defines the maximum number of such tokens that this implementation
- * must support
- */
-#define CLI_CMD_MAX_NUM_TOKENS  100
-
 
 /*****************************************************************************
  * Global Types
@@ -59,7 +51,7 @@ typedef struct cli_token_s   cli_token_t;
 typedef struct cli_prompt_s  cli_prompt_t;
 typedef struct cli_context_s cli_context_t;
 
-typedef bool (*cli_cmd_f) (cli_context_t *ctx_p, int argc, char **args);
+typedef bool (*cli_cmd_f) (cli_context_t *ctx_p, string_t **cmd_tokens_pp);
 
 
 /*****************************************************************************
