@@ -15,7 +15,7 @@ build_dir := build
 CFLAGS := -Wall -Wextra -g
 
 # Defines
-DEFINES :=
+DEFINES := -D_GNU_SOURCE
 
 # Linker flags
 LDFLAGS :=
@@ -24,10 +24,16 @@ LDFLAGS :=
 LDLIBS := -ljansson -lkmrUtils
 
 # Includes
-includes := -Isrc
+includes := -Iinclude \
+            -Iinclude/internal \
+			\
 
 # Source files
-sources := $(src_dir)/cli.c \
+sources := $(src_dir)/cli_builder.c \
+		   $(src_dir)/cli_io.c \
+		   $(src_dir)/cli_log.c \
+		   $(src_dir)/cli_parser.c \
+		   $(src_dir)/cli.c
 		   \
 
 # Object files

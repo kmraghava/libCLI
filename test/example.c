@@ -5,6 +5,9 @@
 
 int main (int argc, char *argv[])
 {
+    (void)argc;
+    (void)argv;
+
     cli_context_t  *ctx_p = cli_context_new ("/tmp/example_cfg.json", false, 0, false, 0);
     {
         cli_prompt_t  *root_prompt_p = cli_context_set_root_prompt(ctx_p, "router>");
