@@ -144,13 +144,13 @@ static void cli_run (cli_context_t  *ctx_p)
         switch (cli_in(ctx_p))
         {
             case CLI_KEY_ENTER:
-                if (!string_blank(ctx_p->line_editor.cmd_p))
+                if (!string_blank(ctx_p->line_buffer.cmd_p))
                 {
-                    cli_log(LOG_LEVEL_LOW, "Received command: %s\n", string_cstr(ctx_p->line_editor.cmd_p));
+                    cli_log(LOG_LEVEL_LOW, "Received command: %s\n", string_cstr(ctx_p->line_buffer.cmd_p));
 
                     cli_cmd_parse(ctx_p);
                 }
-                cli_clear_line_editor(ctx_p);
+                cli_clear_line_buffer(ctx_p);
                 cli_flush(ctx_p, false);
                 break;
 
@@ -213,14 +213,14 @@ void cli_start (cli_context_t  *ctx_p)
         && !ctx_p->enable_ssh_b
        )
     {
-        if (!cli_line_editor_init(ctx_p))
+        if (!cli_line_buffer_init(ctx_p))
             return;
         cli_terminal_init(ctx_p);
 
         cli_run(ctx_p);
 
         cli_terminal_deinit(ctx_p);
-        cli_line_editor_deinit(ctx_p);
+        cli_line_buffer_deinit(ctx_p);
     }
     else
     {

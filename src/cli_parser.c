@@ -198,7 +198,7 @@ static void cli_print_help_q (tree_t  *cmd_tree_p)
  *****************************************************************************/
 void cli_cmd_parse (cli_context_t  *ctx_p)
 {
-    string_t     *in_cmd_p = ctx_p->line_editor.cmd_p;
+    string_t     *in_cmd_p = ctx_p->line_buffer.cmd_p;
     string_t    **cmd_tokens_pp = NULL;
     int           i_tok = 0;
     tree_t       *cmd_tree_p = &ctx_p->cur_prompt_p->cmd_tree;
@@ -265,7 +265,7 @@ RETURN:
  *****************************************************************************/
 void cli_cmd_help_q (cli_context_t  *ctx_p)
 {
-    string_t     *in_cmd_p = ctx_p->line_editor.cmd_p;
+    string_t     *in_cmd_p = ctx_p->line_buffer.cmd_p;
     string_t    **cmd_tokens_pp = NULL;
     int           i_tok = 0;
     tree_t       *cmd_tree_p = &ctx_p->cur_prompt_p->cmd_tree;
@@ -329,7 +329,7 @@ RETURN:
  *****************************************************************************/
 void cli_cmd_help_tab (cli_context_t  *ctx_p)
 {
-    string_t     *in_cmd_p  = ctx_p->line_editor.cmd_p;
+    string_t     *in_cmd_p  = ctx_p->line_buffer.cmd_p;
     string_t    **cmd_tokens_pp = NULL;
     int           i_tok = 0;
     tree_t       *cmd_tree_p = &ctx_p->cur_prompt_p->cmd_tree;
@@ -415,7 +415,7 @@ void cli_cmd_recall_prev (cli_context_t  *ctx_p)
         {
             ctx_p->cur_prompt_p->cur_cmd_nd_p = nd_p;
         
-            cli_clear_line_editor(ctx_p);
+            cli_clear_line_buffer(ctx_p);
             cli_out(ctx_p, "%s", string_cstr(clist_member(nd_p)));
             cli_flush(ctx_p, false);
         }
@@ -435,7 +435,7 @@ void cli_cmd_recall_next (cli_context_t  *ctx_p)
         {
             ctx_p->cur_prompt_p->cur_cmd_nd_p = nd_p;
         
-            cli_clear_line_editor(ctx_p);
+            cli_clear_line_buffer(ctx_p);
             cli_out(ctx_p, "%s", string_cstr(clist_member(nd_p)));
             cli_flush(ctx_p, false);
         }

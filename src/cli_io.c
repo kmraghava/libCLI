@@ -83,7 +83,7 @@ static char cli_read_char (void)
 *****************************************************************************/
 /*****************************************************************************
  *
- *  NAME        : cli_line_editor_init
+ *  NAME        : cli_line_buffer_init
  *
  *  DESCRIPTION : Initialize the line editor
  *
@@ -93,29 +93,29 @@ static char cli_read_char (void)
  *                false otherwise
  *
  *****************************************************************************/
-bool cli_line_editor_init (cli_context_t  *ctx_p)
+bool cli_line_buffer_init (cli_context_t  *ctx_p)
 {
-    ctx_p->line_editor.cmd_p = string_new(NULL);
-    if (!ctx_p->line_editor.cmd_p)
+    ctx_p->line_buffer.cmd_p = string_new(NULL);
+    if (!ctx_p->line_buffer.cmd_p)
     {
         cli_log(LOG_LEVEL_HIGH, "string_new failed\n");
         return false;
     }
 
-    if (!string_reserve(ctx_p->line_editor.cmd_p, 256))
+    if (!string_reserve(ctx_p->line_buffer.cmd_p, 256))
     {
         cli_log(LOG_LEVEL_HIGH, "string_reserve failed\n");
         return false;
     }
 
-    ctx_p->line_editor.pos = 0;
+    ctx_p->line_buffer.pos = 0;
 
     return true;
 }
 
 /*****************************************************************************
  *
- *  NAME        : cli_line_editor_deinit
+ *  NAME        : cli_line_buffer_deinit
  *
  *  DESCRIPTION : Deinitialize the line editor
  *
@@ -124,10 +124,10 @@ bool cli_line_editor_init (cli_context_t  *ctx_p)
  *  RETURNS     : void
  *
  *****************************************************************************/
-void cli_line_editor_deinit (cli_context_t  *ctx_p)
+void cli_line_buffer_deinit (cli_context_t  *ctx_p)
 {
-    ctx_p->line_editor.cmd_p = string_delete(ctx_p->line_editor.cmd_p);
-    ctx_p->line_editor.pos = 0;
+    ctx_p->line_buffer.cmd_p = string_delete(ctx_p->line_buffer.cmd_p);
+    ctx_p->line_buffer.pos = 0;
 }
 
 /*****************************************************************************
@@ -146,8 +146,8 @@ void cli_terminal_init (cli_context_t  *ctx_p)
     struct termios  raw_termios;
 
     // Get the original terminal settings
-    tcgetattr(STDIN_FILENO, &ctx_p->line_editor.orig_termios);
-    raw_termios = ctx_p->line_editor.orig_termios;
+    tcgetattr(STDIN_FILENO, &ctx_p->line_buffer.orig_termios);
+    raw_termios = ctx_p->line_buffer.orig_termios;
 
     // Set the terminal to raw mode
     raw_termios.c_lflag &= ~(ICANON | ECHO);  // Disable line buffering and echo
@@ -170,12 +170,12 @@ void cli_terminal_init (cli_context_t  *ctx_p)
 void cli_terminal_deinit (cli_context_t  *ctx_p)
 {
     // Restore the original terminal settings before exiting
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &ctx_p->line_editor.orig_termios);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &ctx_p->line_buffer.orig_termios);
 }
 
 /*****************************************************************************
  *
- *  NAME        : cli_clear_line_editor
+ *  NAME        : cli_clear_line_buffer
  *
  *  DESCRIPTION : Clear the line editor buffer
  *
@@ -184,10 +184,10 @@ void cli_terminal_deinit (cli_context_t  *ctx_p)
  *  RETURNS     : void
  *
  *****************************************************************************/
-void cli_clear_line_editor (cli_context_t  *ctx_p)
+void cli_clear_line_buffer (cli_context_t  *ctx_p)
 {
-    string_clear(ctx_p->line_editor.cmd_p);
-    ctx_p->line_editor.pos = 0;
+    string_clear(ctx_p->line_buffer.cmd_p);
+    ctx_p->line_buffer.pos = 0;
 }
 
 /*****************************************************************************
@@ -228,10 +228,10 @@ cli_key_e cli_in (cli_context_t  *ctx_p)
         }
         else if (ch == 127 || ch == '\b') // Backspace character
         {
-            if (ctx_p->line_editor.pos > 0)
+            if (ctx_p->line_buffer.pos > 0)
             {
-                string_remove(ctx_p->line_editor.cmd_p, ctx_p->line_editor.pos - 1, 1);
-                ctx_p->line_editor.pos--;
+                string_remove(ctx_p->line_buffer.cmd_p, ctx_p->line_buffer.pos - 1, 1);
+                ctx_p->line_buffer.pos--;
                 cli_flush(ctx_p, true);
             }
         }
@@ -253,17 +253,17 @@ cli_key_e cli_in (cli_context_t  *ctx_p)
                 }
                 else if (ch == 'C')
                 {
-                    if (ctx_p->line_editor.pos < string_length(ctx_p->line_editor.cmd_p))
+                    if (ctx_p->line_buffer.pos < string_length(ctx_p->line_buffer.cmd_p))
                     {
-                        ctx_p->line_editor.pos++;
+                        ctx_p->line_buffer.pos++;
                         cli_print(ctx_p, "\x1b[1C");
                     }
                 }
                 else if (ch == 'D')
                 {
-                    if (ctx_p->line_editor.pos > 0)
+                    if (ctx_p->line_buffer.pos > 0)
                     {
-                        ctx_p->line_editor.pos--;
+                        ctx_p->line_buffer.pos--;
                         cli_print(ctx_p, "\x1b[1D");
                     }
                 }
@@ -272,9 +272,9 @@ cli_key_e cli_in (cli_context_t  *ctx_p)
                     ch = cli_read_char();
                     if (ch == '~')
                     {
-                        if (ctx_p->line_editor.pos < string_length(ctx_p->line_editor.cmd_p))
+                        if (ctx_p->line_buffer.pos < string_length(ctx_p->line_buffer.cmd_p))
                         {
-                            string_remove(ctx_p->line_editor.cmd_p, ctx_p->line_editor.pos, 1);
+                            string_remove(ctx_p->line_buffer.cmd_p, ctx_p->line_buffer.pos, 1);
                             cli_flush(ctx_p, true);
                         }
                     }
@@ -293,8 +293,8 @@ cli_key_e cli_in (cli_context_t  *ctx_p)
                  || ch == '/'
                 )
         {
-            string_insertc(ctx_p->line_editor.cmd_p, ctx_p->line_editor.pos, ch);
-            ctx_p->line_editor.pos++;
+            string_insertc(ctx_p->line_buffer.cmd_p, ctx_p->line_buffer.pos, ch);
+            ctx_p->line_buffer.pos++;
 
             cli_flush(ctx_p, true);
         }
@@ -327,7 +327,7 @@ void cli_out (cli_context_t  *ctx_p, const char *fmt_p, ...)
     }
     else
     {
-        string_append(ctx_p->line_editor.cmd_p, str_p);
+        string_append(ctx_p->line_buffer.cmd_p, str_p);
         free(str_p);
     }
     va_end(args);
@@ -353,14 +353,14 @@ void cli_flush (cli_context_t  *ctx_p, bool keep_cursor_pos_b)
     cli_print(ctx_p, "\x1b[2K");
 
     // Print the prompt and the current line buffer
-    cli_print(ctx_p, "\r%s %s", string_cstr(ctx_p->cur_prompt_p->name_p), string_cstr(ctx_p->line_editor.cmd_p));
+    cli_print(ctx_p, "\r%s %s", string_cstr(ctx_p->cur_prompt_p->name_p), string_cstr(ctx_p->line_buffer.cmd_p));
 
     //    Update the cursor position to the end of the line
     // Or move the cursor back to the current position
     if (keep_cursor_pos_b)
-        cli_print(ctx_p, "\r\x1b[%ldC", string_length(ctx_p->cur_prompt_p->name_p) + 1 + ctx_p->line_editor.pos);
-    else if (ctx_p->line_editor.pos < ctx_p->line_editor.cmd_p->length)
-        ctx_p->line_editor.pos = ctx_p->line_editor.cmd_p->length;
+        cli_print(ctx_p, "\r\x1b[%ldC", string_length(ctx_p->cur_prompt_p->name_p) + 1 + ctx_p->line_buffer.pos);
+    else if (ctx_p->line_buffer.pos < ctx_p->line_buffer.cmd_p->length)
+        ctx_p->line_buffer.pos = ctx_p->line_buffer.cmd_p->length;
 }
 
 /*****************************************************************************

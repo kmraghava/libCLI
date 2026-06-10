@@ -53,14 +53,14 @@ typedef enum
 
 } cli_key_e;
 
-typedef struct line_editor_s
+typedef struct _s
 {
     string_t        *cmd_p;
     long             pos;
 
     struct termios   orig_termios;
 
-} line_editor_t;
+} line_buffer_t;
 
 
 /*****************************************************************************
@@ -74,13 +74,13 @@ typedef struct line_editor_s
 /*****************************************************************************
  * Global Function Prototypes
  *****************************************************************************/
-extern bool cli_line_editor_init   (cli_context_t  *ctx_p);
-extern void cli_line_editor_deinit (cli_context_t  *ctx_p);
+extern bool cli_line_buffer_init   (cli_context_t  *ctx_p);
+extern void cli_line_buffer_deinit (cli_context_t  *ctx_p);
 
 extern void cli_terminal_init   (cli_context_t  *ctx_p);
 extern void cli_terminal_deinit (cli_context_t  *ctx_p);
 
-extern void cli_clear_line_editor (cli_context_t  *ctx_p);
+extern void cli_clear_line_buffer (cli_context_t  *ctx_p);
 
 extern cli_key_e cli_in    (cli_context_t  *ctx_p);
 

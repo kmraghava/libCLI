@@ -47,7 +47,7 @@ struct cli_context_s
     cli_prompt_t   *root_prompt_p,
                    *cur_prompt_p;
 
-    line_editor_t   line_editor;
+    line_buffer_t   line_buffer;
 
     string_t       *cfg_filename_p;
     json_t         *cc_jobj_p;
