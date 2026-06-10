@@ -3,6 +3,15 @@
 #include <stddef.h>
 
 
+static bool validator_stub (cli_context_t *ctx_p, uint64_t value_type, const char *value_p)
+{
+    (void)ctx_p;
+    (void)value_type;
+    (void)value_p;
+
+    return true;
+}
+
 int main (int argc, char *argv[])
 {
     (void)argc;
@@ -24,7 +33,7 @@ int main (int argc, char *argv[])
                             {
                                 cli_token_t  *if_eth_nd_p = cli_token_add_token(ctx_p, if_nd_p, "ethernet", "Configure ethernet interface", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                 {
-                                    cli_token_t  *if_n_nd_p = cli_token_add_token(ctx_p, if_eth_nd_p, "<0-5>", "Ethernet interface number", CLI_TOKEN_TYPE_VALUE, NULL);
+                                    cli_token_t  *if_n_nd_p = cli_token_add_token(ctx_p, if_eth_nd_p, "<0-5>", "Ethernet interface number", CLI_TOKEN_TYPE_VALUE_OTHER, validator_stub);
                                     {
                                         cli_prompt_t  *cfg_if_prompt = cli_token_set_prompt(ctx_p, if_n_nd_p, "router(config-if)#");
                                         {
@@ -50,7 +59,7 @@ int main (int argc, char *argv[])
                                                         cli_token_add_token(ctx_p, ipv6_addr_cfg_meth_nd_p, "advertise", "Include this address in router advertisements", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                         cli_token_add_token(ctx_p, ipv6_addr_cfg_meth_nd_p, "no-advertise", "Don't include this address in router advertisements", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                     }
-                                                    ipv6_addr_cfg_meth_nd_p = cli_token_add_token(ctx_p, ipv6_addr_nd_p, "<prefix/prefix-length>", "IPv6 address/prefix-length. Eg: 2001:db8:f101::1/64", CLI_TOKEN_TYPE_VALUE, NULL);
+                                                    ipv6_addr_cfg_meth_nd_p = cli_token_add_token(ctx_p, ipv6_addr_nd_p, "<prefix/prefix-length>", "IPv6 address/prefix-length. Eg: 2001:db8:f101::1/64", CLI_TOKEN_TYPE_VALUE_OTHER, validator_stub);
                                                     {
                                                         cli_token_add_token(ctx_p, ipv6_addr_cfg_meth_nd_p, "advertise", "Include this address in router advertisements", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                         cli_token_add_token(ctx_p, ipv6_addr_cfg_meth_nd_p, "no-advertise", "Don't include this address in router advertisements", CLI_TOKEN_TYPE_KEYWORD, NULL);
@@ -66,7 +75,7 @@ int main (int argc, char *argv[])
                                                         cli_token_add_token(ctx_p, ipv6_dhcli_nd_p, "request-prefix-delegation", "Request prefix delegation", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                         ipv6_pdlen_nd_p = cli_token_add_token(ctx_p, ipv6_dhcli_nd_p, "delegated-prefix-length", "Delegated Prefix length to request in DHCPv6 PD", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                         {
-                                                            cli_token_add_token(ctx_p, ipv6_pdlen_nd_p, "<1-64>", "Prefix length", CLI_TOKEN_TYPE_VALUE, NULL);
+                                                            cli_token_add_token(ctx_p, ipv6_pdlen_nd_p, "<1-64>", "Prefix length", CLI_TOKEN_TYPE_VALUE_OTHER, validator_stub);
                                                         }
                                                         cli_token_add_token(ctx_p, ipv6_dhcli_nd_p, "request-other-info", "Request other information such as Name Servers, NTP Servers", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                     }
@@ -83,7 +92,7 @@ int main (int argc, char *argv[])
         }
     }
 
-    cli_run(ctx_p);
+    cli_start(ctx_p);
     
     return 0;
 }

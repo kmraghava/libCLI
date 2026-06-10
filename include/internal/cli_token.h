@@ -39,18 +39,18 @@ extern "C" {
  *****************************************************************************/
 struct cli_token_s
 {
-    cli_context_t  *ctx_p;
+    cli_context_t    *ctx_p;
 
-    tree_node_t     tnode;
+    tree_node_t       tnode;
 
-    int             type;
-    string_t       *name_p;     // Keyword or value template
-    string_t       *desc_p;     // Description
+    string_t         *name_p;     // Keyword or value template
+    string_t         *desc_p;     // Description
 
-    cli_cmd_f       cli_cmd_cb;
+    uint64_t          type;
+    cli_validator_f   validator_cb;
 
-    cli_prompt_t   *cprompt_p;
-    cli_prompt_t   *pprompt_p;
+    cli_prompt_t     *cprompt_p;
+    cli_prompt_t     *pprompt_p;
 };
 
 
@@ -65,12 +65,12 @@ struct cli_token_s
 /*****************************************************************************
  * Global Function Prototypes
  *****************************************************************************/
-extern cli_token_t* cli_token_add_token (cli_context_t  *ctx_p,
-                                         cli_token_t    *parent_p,
-                                         const char     *name_p,
-                                         const char     *desc_p,
-                                         int             type,
-                                         cli_cmd_f       cmd_valid);
+extern cli_token_t* cli_token_add_token (cli_context_t    *ctx_p,
+                                         cli_token_t      *parent_p,
+                                         const char       *name_p,
+                                         const char       *desc_p,
+                                         uint64_t          type,
+                                         cli_validator_f   cb);
 
 extern cli_prompt_t* cli_token_set_prompt (cli_context_t  *ctx_p,
                                            cli_token_t    *parent_p,

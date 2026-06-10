@@ -316,12 +316,12 @@ cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
  *  RETURNS     : CLI token that was added
  *
  *****************************************************************************/
-cli_token_t* cli_prompt_add_token (cli_context_t  *ctx_p,
-                                   cli_prompt_t   *parent_p,
-                                   const char     *name_p,
-                                   const char     *desc_p,
-                                   int             type,
-                                   cli_cmd_f       cb)
+cli_token_t* cli_prompt_add_token (cli_context_t   *ctx_p,
+                                   cli_prompt_t     *parent_p,
+                                   const char       *name_p,
+                                   const char       *desc_p,
+                                   uint64_t          type,
+                                   cli_validator_f   cb)
 {
     cli_token_t  *token_p = NULL;
 
@@ -332,8 +332,6 @@ cli_token_t* cli_prompt_add_token (cli_context_t  *ctx_p,
         || !parent_p
         || !name_p
         || !desc_p
-        ||  type < 0
-        ||  type >= CLI_NUM_TOKEN_TYPES
        )
     {
         return NULL;
@@ -360,7 +358,7 @@ cli_token_t* cli_prompt_add_token (cli_context_t  *ctx_p,
     tree_add_node(parent_p->cmd_tree, token_p->tnode);
 
     token_p->type = type;
-    token_p->cli_cmd_cb = cb;
+    token_p->validator_cb = cb;
     token_p->name_p = save_name_p;
     token_p->desc_p = save_desc_p;
 
@@ -390,12 +388,12 @@ FATAL:
  *  RETURNS     : CLI token that was added
  *
  *****************************************************************************/
-cli_token_t* cli_token_add_token (cli_context_t  *ctx_p,
-                                  cli_token_t    *parent_p,
-                                  const char     *name_p,
-                                  const char     *desc_p,
-                                  int             type,
-                                  cli_cmd_f       cb)
+cli_token_t* cli_token_add_token (cli_context_t    *ctx_p,
+                                  cli_token_t      *parent_p,
+                                  const char       *name_p,
+                                  const char       *desc_p,
+                                  uint64_t          type,
+                                  cli_validator_f   cb)
 {
     cli_token_t  *token_p = NULL;
 
@@ -406,8 +404,6 @@ cli_token_t* cli_token_add_token (cli_context_t  *ctx_p,
         || !parent_p
         || !name_p
         || !desc_p
-        ||  type < 0
-        ||  type >= CLI_NUM_TOKEN_TYPES
        )
     {
         return NULL;
@@ -436,7 +432,7 @@ cli_token_t* cli_token_add_token (cli_context_t  *ctx_p,
     tree_add_node(parent_p->tnode.sub_tree, token_p->tnode);
 
     token_p->type = type;
-    token_p->cli_cmd_cb = cb;
+    token_p->validator_cb = cb;
     token_p->name_p = save_name_p;
     token_p->desc_p = save_desc_p;
 

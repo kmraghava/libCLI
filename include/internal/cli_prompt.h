@@ -45,7 +45,7 @@ struct cli_prompt_s
     string_t       *name_p;
 
     clist_t        *history_p;
-    clist_node_t   *cur_cmd_p;
+    clist_node_t   *cur_cmd_nd_p;
 
     cli_token_t    *parent_p;
     tree_t          cmd_tree;
@@ -63,12 +63,12 @@ struct cli_prompt_s
 /*****************************************************************************
  * Global Function Prototypes
  *****************************************************************************/
-extern cli_token_t* cli_prompt_add_token (cli_context_t  *ctx_p,
-                                          cli_prompt_t   *prompt_p,
-                                          const char     *name_p,
-                                          const char     *desc_p,
-                                          int             type,
-                                          cli_cmd_f       cmd_valid);
+extern cli_token_t* cli_prompt_add_token (cli_context_t    *ctx_p,
+                                          cli_prompt_t     *prompt_p,
+                                          const char       *name_p,
+                                          const char       *desc_p,
+                                          uint64_t          type,
+                                          cli_validator_f   cb);
                                         
 
 /*****************************************************************************

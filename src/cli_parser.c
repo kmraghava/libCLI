@@ -96,7 +96,7 @@ static bool cli_match_token (tree_node_t *tnode_p, void *key_p)
  *  DESCRIPTION : Match CLI token with the given name.
  *
  *  PARAMS      : member_p - CLI token
- *                key_p    - NULL
+ *                key_p    - User entered value to match
  *
  *  RETURNS     : true if member_p is a value token
  *                false otherwise
@@ -105,10 +105,12 @@ static bool cli_match_token (tree_node_t *tnode_p, void *key_p)
 static bool cli_match_value_token (tree_node_t *tnode_p, void *key_p)
 {
     cli_token_t  *token_p = tree_get(tnode_p, cli_token_t, tnode);
+    string_t     *value_p = key_p;
 
-    (void)key_p;
+    if (token_p->validator_cb)
+        return token_p->validator_cb(token_p->ctx_p, token_p->type, string_cstr(value_p));
 
-    return (CLI_TOKEN_TYPE_VALUE == token_p->type);
+    return false;
 }
 
 /*****************************************************************************
@@ -137,14 +139,16 @@ static void cli_cmd_add_to_history (cli_prompt_t  *prompt_p,
             return;
         }
 
-        clist_node_t *node_p = clist_push_back(prompt_p->history_p, hist_cmd_p);
-        if (node_p)
-            prompt_p->cur_cmd_p = node_p;
-        else
+        if (!clist_push_back(prompt_p->history_p, hist_cmd_p))
         {
             cli_log(LOG_LEVEL_HIGH, "Failed to add command to history\n");
             string_delete(hist_cmd_p);
         }
+        
+        /* Reset current command node pointer when a new command is added to history
+         * so that the next recall starts from the most recent command.
+         */
+        prompt_p->cur_cmd_nd_p = NULL;
     }
 }
 
@@ -207,13 +211,15 @@ void cli_cmd_parse (cli_context_t  *ctx_p)
         return;
     }
 
+    cli_cmd_add_to_history(ctx_p->cur_prompt_p, in_cmd_p);
+
     while (cmd_tokens_pp[i_tok])
     {
         if (string_length(cmd_tokens_pp[i_tok]) > 0)
         {
             token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_token);
             if (!token_p)
-                token_p = cli_tree_find_token(cmd_tree_p, 1, NULL, cli_match_value_token);
+                token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_value_token);
 
             if (!token_p)
             {
@@ -238,11 +244,6 @@ void cli_cmd_parse (cli_context_t  *ctx_p)
         cli_print(ctx_p, "\n\tIncomplete command\n\n");
         goto RETURN;
     }
-
-    if (token_p->cli_cmd_cb)
-        token_p->cli_cmd_cb(ctx_p, cmd_tokens_pp);
-
-    cli_cmd_add_to_history(ctx_p->cur_prompt_p, in_cmd_p);
 
 RETURN:
     if (cmd_tokens_pp)
@@ -289,7 +290,7 @@ void cli_cmd_help_q (cli_context_t  *ctx_p)
         {
             token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_token);
             if (!token_p)
-                token_p = cli_tree_find_token(cmd_tree_p, 1, NULL, cli_match_value_token);
+                token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_value_token);
 
             if (!token_p)
             {
@@ -347,6 +348,9 @@ void cli_cmd_help_tab (cli_context_t  *ctx_p)
         {
             token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_token);
             if (!token_p)
+                token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_value_token);
+
+            if (!token_p)
             {
                 cli_print(ctx_p, "\n\n\tInvalid command\n\n");
                 goto RETURN;
@@ -358,13 +362,24 @@ void cli_cmd_help_tab (cli_context_t  *ctx_p)
         i_tok++;
     }
 
-    if (token_p && string_last(in_cmd_p) != ' ')
-        cli_out(ctx_p, "%s ", string_cstr(token_p->name_p) + string_length(cmd_tokens_pp[i_tok-1]));
-    else
+    if (   token_p
+        && token_p->type == CLI_TOKEN_TYPE_KEYWORD
+        && string_last(in_cmd_p) != ' '
+       )
     {
+        cli_out(ctx_p, "%s ", string_cstr(token_p->name_p) + string_length(cmd_tokens_pp[i_tok-1]));
+    }
+    else if (   string_length(in_cmd_p) == 0
+             || string_last(in_cmd_p) == ' '
+            )
+    {
+        // Find the first keyword token in the subtree and auto-complete with that
         token_p = tree_first_member(*cmd_tree_p, cli_token_t, tnode);
-        if (token_p && token_p->type != CLI_TOKEN_TYPE_VALUE)
-             cli_out(ctx_p, "%s ", string_cstr(token_p->name_p));
+        while (token_p && token_p->type != CLI_TOKEN_TYPE_KEYWORD)
+            token_p = tree_next_member(*cmd_tree_p, token_p->tnode, cli_token_t, tnode);
+
+        if (token_p)
+            cli_out(ctx_p, "%s ", string_cstr(token_p->name_p));
     }
 
 RETURN:
@@ -372,6 +387,59 @@ RETURN:
         string_array_del(cmd_tokens_pp);
 
     return;
+}
+
+/*****************************************************************************
+ *
+ *  NAME        : cli_cmd_recall_prev
+ *                cli_cmd_recall_next
+ *
+ *  DESCRIPTION : Recall previous or next command from history
+ *
+ *  PARAMS      : ctx_p - CLI context
+ *
+ *  RETURNS     : void
+ *
+ *****************************************************************************/
+void cli_cmd_recall_prev (cli_context_t  *ctx_p)
+{
+    if (   ctx_p->cur_prompt_p
+        && clist_count(ctx_p->cur_prompt_p->history_p) > 0
+       )
+    {
+        clist_node_t *nd_p =   ctx_p->cur_prompt_p->cur_cmd_nd_p
+                             ? clist_prev(ctx_p->cur_prompt_p->cur_cmd_nd_p)
+                             : clist_last(ctx_p->cur_prompt_p->history_p);
+
+        if (nd_p != clist_head(ctx_p->cur_prompt_p->history_p))
+        {
+            ctx_p->cur_prompt_p->cur_cmd_nd_p = nd_p;
+        
+            cli_clear_line_editor(ctx_p);
+            cli_out(ctx_p, "%s", string_cstr(clist_member(nd_p)));
+            cli_flush(ctx_p, false);
+        }
+    }
+}
+void cli_cmd_recall_next (cli_context_t  *ctx_p)
+{
+    if (   ctx_p->cur_prompt_p
+        && clist_count(ctx_p->cur_prompt_p->history_p) > 0
+       )
+    {
+        clist_node_t *nd_p =   ctx_p->cur_prompt_p->cur_cmd_nd_p
+                             ? clist_next(ctx_p->cur_prompt_p->cur_cmd_nd_p)
+                             : clist_tail(ctx_p->cur_prompt_p->history_p);
+
+        if (nd_p != clist_tail(ctx_p->cur_prompt_p->history_p))
+        {
+            ctx_p->cur_prompt_p->cur_cmd_nd_p = nd_p;
+        
+            cli_clear_line_editor(ctx_p);
+            cli_out(ctx_p, "%s", string_cstr(clist_member(nd_p)));
+            cli_flush(ctx_p, false);
+        }
+    }
 }
 
 

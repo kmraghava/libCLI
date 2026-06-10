@@ -38,20 +38,25 @@ extern "C" {
 /*****************************************************************************
  * Global Types
  *****************************************************************************/
-enum
-{
-    CLI_TOKEN_TYPE_KEYWORD,
-    CLI_TOKEN_TYPE_VALUE,
-    CLI_TOKEN_TYPE_PROMPT,
+#define CLI_TOKEN_TYPE_KEYWORD                     0
+#define CLI_TOKEN_TYPE_VALUE_INT                   0x001
+#define CLI_TOKEN_TYPE_VALUE_REAL                  0x002
+#define CLI_TOKEN_TYPE_VALUE_STRING                0x004
+#define CLI_TOKEN_TYPE_VALUE_IPADDR                0x008
+#define CLI_TOKEN_TYPE_VALUE_IPADDR_PLEN           0x010
+#define CLI_TOKEN_TYPE_VALUE_IP4ADDR               0x020
+#define CLI_TOKEN_TYPE_VALUE_IP4ADDR_PLEN          0x040
+#define CLI_TOKEN_TYPE_VALUE_IP6ADDR               0x080
+#define CLI_TOKEN_TYPE_VALUE_IP6ADDR_PLEN          0x100
 
-    CLI_NUM_TOKEN_TYPES
-};
+#define CLI_TOKEN_TYPE_VALUE_OTHER                 0x100000000
+
 
 typedef struct cli_token_s   cli_token_t;
 typedef struct cli_prompt_s  cli_prompt_t;
 typedef struct cli_context_s cli_context_t;
 
-typedef bool (*cli_cmd_f) (cli_context_t *ctx_p, string_t **cmd_tokens_pp);
+typedef bool (*cli_validator_f) (cli_context_t *ctx_p, uint64_t value_type, const char *value_p);
 
 
 /*****************************************************************************
@@ -74,25 +79,25 @@ extern cli_context_t* cli_context_new (const char  *cfg_filename_p,
 extern cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
                                                   const char     *name_p);
 
-extern cli_token_t* cli_prompt_add_token (cli_context_t  *ctx_p,
-                                          cli_prompt_t   *prompt_p,
-                                          const char     *name_p,
-                                          const char     *desc_p,
-                                          int             type,
-                                          cli_cmd_f       cmd_valid);
+extern cli_token_t* cli_prompt_add_token (cli_context_t    *ctx_p,
+                                          cli_prompt_t     *prompt_p,
+                                          const char       *name_p,
+                                          const char       *desc_p,
+                                          uint64_t          type,
+                                          cli_validator_f   cb);
                                         
-extern cli_token_t* cli_token_add_token (cli_context_t  *ctx_p,
-                                         cli_token_t    *parent_p,
-                                         const char     *name_p,
-                                         const char     *desc_p,
-                                         int             type,
-                                         cli_cmd_f       cmd_valid);
+extern cli_token_t* cli_token_add_token (cli_context_t    *ctx_p,
+                                         cli_token_t      *parent_p,
+                                         const char       *name_p,
+                                         const char       *desc_p,
+                                         uint64_t          type,
+                                         cli_validator_f   cb);
 
 extern cli_prompt_t* cli_token_set_prompt (cli_context_t  *ctx_p,
                                            cli_token_t    *parent_p,
                                            const char     *name_p);
 
-extern void cli_run (cli_context_t  *ctx_p);
+extern void cli_start (cli_context_t  *ctx_p);
 
 
 /*****************************************************************************

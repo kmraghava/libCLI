@@ -47,9 +47,13 @@ extern "C" {
 /*****************************************************************************
  * Global Function Prototypes
  *****************************************************************************/
-extern void cli_cmd_parse    (cli_context_t  *ctx_p);
+extern void cli_cmd_parse (cli_context_t  *ctx_p);
+
 extern void cli_cmd_help_q   (cli_context_t  *ctx_p);
 extern void cli_cmd_help_tab (cli_context_t  *ctx_p);
+
+extern void cli_cmd_recall_prev (cli_context_t  *ctx_p);
+extern void cli_cmd_recall_next (cli_context_t  *ctx_p);
 
 
 /*****************************************************************************
