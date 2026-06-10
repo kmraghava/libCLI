@@ -84,7 +84,9 @@ static bool cli_match_token (tree_node_t *tnode_p, void *key_p)
     cli_token_t  *token_p = tree_get(tnode_p, cli_token_t, tnode);
     string_t     *name_p = key_p;
 
-    return (0 == string_compare(token_p->name_p, name_p, string_length(name_p), true));
+    return (   CLI_TOKEN_TYPE_KEYWORD == token_p->type
+            && 0 == string_compare(token_p->name_p, name_p, string_length(name_p), true)
+           );
 }
 
 /*****************************************************************************
@@ -205,19 +207,22 @@ void cli_cmd_parse (cli_context_t  *ctx_p)
         return;
     }
 
-    while (cmd_tokens_pp[i_tok] && string_length(cmd_tokens_pp[i_tok]) > 0)
+    while (cmd_tokens_pp[i_tok])
     {
-        token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_token);
-        if (!token_p)
-            token_p = cli_tree_find_token(cmd_tree_p, 1, NULL, cli_match_value_token);
-
-        if (!token_p)
+        if (string_length(cmd_tokens_pp[i_tok]) > 0)
         {
-            cli_print(ctx_p, "\n\tInvalid command\n\n");
-            goto RETURN;
-        }
+            token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_token);
+            if (!token_p)
+                token_p = cli_tree_find_token(cmd_tree_p, 1, NULL, cli_match_value_token);
 
-        cmd_tree_p = &token_p->tnode.sub_tree;
+            if (!token_p)
+            {
+                cli_print(ctx_p, "\n\tInvalid command\n\n");
+                goto RETURN;
+            }
+
+            cmd_tree_p = &token_p->tnode.sub_tree;
+        }
 
         i_tok++;
     }
@@ -278,19 +283,22 @@ void cli_cmd_help_q (cli_context_t  *ctx_p)
         return;
     }
 
-    while (cmd_tokens_pp[i_tok] && string_length(cmd_tokens_pp[i_tok]) > 0)
+    while (cmd_tokens_pp[i_tok])
     {
-        token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_token);
-        if (!token_p)
-            token_p = cli_tree_find_token(cmd_tree_p, 1, NULL, cli_match_value_token);
-
-        if (!token_p)
+        if (string_length(cmd_tokens_pp[i_tok]) > 0)
         {
-            cli_print(ctx_p, "\tInvalid command\n");
-            goto RETURN;
-        }
+            token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_token);
+            if (!token_p)
+                token_p = cli_tree_find_token(cmd_tree_p, 1, NULL, cli_match_value_token);
 
-        cmd_tree_p = &token_p->tnode.sub_tree;
+            if (!token_p)
+            {
+                cli_print(ctx_p, "\tInvalid command\n");
+                goto RETURN;
+            }
+
+            cmd_tree_p = &token_p->tnode.sub_tree;
+        }
 
         i_tok++;
     }
@@ -333,16 +341,19 @@ void cli_cmd_help_tab (cli_context_t  *ctx_p)
         return;
     }
 
-    while (cmd_tokens_pp[i_tok] && string_length(cmd_tokens_pp[i_tok]) > 0)
+    while (cmd_tokens_pp[i_tok])
     {
-        token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_token);
-        if (!token_p)
+        if (string_length(cmd_tokens_pp[i_tok]) > 0)
         {
-            cli_print(ctx_p, "\n\n\tInvalid command\n\n");
-            goto RETURN;
-        }
+            token_p = cli_tree_find_token(cmd_tree_p, 1, cmd_tokens_pp[i_tok], cli_match_token);
+            if (!token_p)
+            {
+                cli_print(ctx_p, "\n\n\tInvalid command\n\n");
+                goto RETURN;
+            }
 
-        cmd_tree_p = &token_p->tnode.sub_tree;
+            cmd_tree_p = &token_p->tnode.sub_tree;
+        }
 
         i_tok++;
     }

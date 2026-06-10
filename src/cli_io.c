@@ -290,6 +290,7 @@ cli_key_e cli_in (cli_context_t  *ctx_p)
                  || ch == ':'
                  || ch == ' '
                  || ch == '"'
+                 || ch == '/'
                 )
         {
             string_insertc(ctx_p->line_editor.cmd_p, ctx_p->line_editor.pos, ch);
@@ -348,18 +349,18 @@ void cli_out (cli_context_t  *ctx_p, const char *fmt_p, ...)
  *****************************************************************************/
 void cli_flush (cli_context_t  *ctx_p, bool keep_cursor_pos_b)
 {
-    // Clear the current line and move the cursor to the beginning
-    cli_print(ctx_p, "\r\x1b[2K");
+    // Clear the current line
+    cli_print(ctx_p, "\x1b[2K");
 
     // Print the prompt and the current line buffer
     cli_print(ctx_p, "\r%s %s", string_cstr(ctx_p->cur_prompt_p->name_p), string_cstr(ctx_p->line_editor.cmd_p));
 
     //    Update the cursor position to the end of the line
     // Or move the cursor back to the current position
-    if (!keep_cursor_pos_b)
-        ctx_p->line_editor.pos = ctx_p->line_editor.cmd_p->length;
+    if (keep_cursor_pos_b)
+        cli_print(ctx_p, "\r\x1b[%ldC", string_length(ctx_p->cur_prompt_p->name_p) + 1 + ctx_p->line_editor.pos);
     else if (ctx_p->line_editor.pos < ctx_p->line_editor.cmd_p->length)
-        cli_print(ctx_p, "\x1b[%ldD", string_length(ctx_p->line_editor.cmd_p) - ctx_p->line_editor.pos);
+        ctx_p->line_editor.pos = ctx_p->line_editor.cmd_p->length;
 }
 
 /*****************************************************************************
