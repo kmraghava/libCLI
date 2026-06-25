@@ -14,11 +14,15 @@
 /*****************************************************************************
    Include Files
 *****************************************************************************/
+#include <arpa/inet.h>
 #include "cli_context.h"
 #include "cli_log.h"
 #include "cli_parser.h"
 #include "cli_prompt.h"
 #include "cli_token.h"
+#include "cli_vvalidator.h"
+#include <errno.h>
+#include "kmrUtils/str.h"
 
 
 /*****************************************************************************
@@ -54,8 +58,8 @@
 /*****************************************************************************
    Local Function Prototypes
 *****************************************************************************/
-static bool cli_match_value_token (tree_node_t *tnode_p, void *key_p);
-static bool cli_match_token       (tree_node_t *tnode_p, void *key_p);
+static bool cli_match_token       (tree_node_t  *tnode_p, void  *key_p);
+static bool cli_match_value_token (tree_node_t  *tnode_p, void  *key_p);
 
 static void cli_cmd_add_to_history (cli_prompt_t  *prompt_p,
                                     string_t      *cmd_p);
@@ -79,7 +83,7 @@ static void cli_print_help_q (tree_t  *cmd_tree_p);
  *                false otherwise
  *
  *****************************************************************************/
-static bool cli_match_token (tree_node_t *tnode_p, void *key_p)
+static bool cli_match_token (tree_node_t  *tnode_p, void  *key_p)
 {
     cli_token_t  *token_p = tree_get(tnode_p, cli_token_t, tnode);
     string_t     *name_p = key_p;
@@ -102,13 +106,25 @@ static bool cli_match_token (tree_node_t *tnode_p, void *key_p)
  *                false otherwise
  *
  *****************************************************************************/
-static bool cli_match_value_token (tree_node_t *tnode_p, void *key_p)
+static bool cli_match_value_token (tree_node_t  *tnode_p, void  *key_p)
 {
     cli_token_t  *token_p = tree_get(tnode_p, cli_token_t, tnode);
     string_t     *value_p = key_p;
 
     if (token_p->validator_cb)
-        return token_p->validator_cb(token_p->ctx_p, token_p->type, string_cstr(value_p));
+        return token_p->validator_cb(token_p->ctx_p, token_p->type, value_p);
+
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_INT         ) && cli_value_is_int          (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_HEX         ) && cli_value_is_hex          (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_REAL        ) && cli_value_is_real         (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_STRING      ) && cli_value_is_string       (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_BOOL        ) && cli_value_is_bool         (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_IP4ADDR     ) && cli_value_is_ip4addr      (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_IP4ADDR_PLEN) && cli_value_is_ip4addr_plen (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_IP6ADDR     ) && cli_value_is_ip6addr      (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_IP6ADDR_PLEN) && cli_value_is_ip6addr_plen (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_FQDN        ) && cli_value_is_fqdn         (token_p->ctx_p, token_p->type, value_p))  return true;
+    if ((token_p->type & CLI_TOKEN_TYPE_VALUE_MACADDR     ) && cli_value_is_macaddr      (token_p->ctx_p, token_p->type, value_p))  return true;
 
     return false;
 }

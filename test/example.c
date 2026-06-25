@@ -1,9 +1,10 @@
 
 #include "cli.h"
 #include <stddef.h>
+#include "kmrUtils/str.h"
 
 
-static bool validator_stub (cli_context_t *ctx_p, uint64_t value_type, const char *value_p)
+static bool validator_stub (cli_context_t *ctx_p, uint64_t value_type, string_t *value_p)
 {
     (void)ctx_p;
     (void)value_type;
@@ -59,7 +60,7 @@ int main (int argc, char *argv[])
                                                         cli_token_add_token(ctx_p, ipv6_addr_cfg_meth_nd_p, "advertise", "Include this address in router advertisements", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                         cli_token_add_token(ctx_p, ipv6_addr_cfg_meth_nd_p, "no-advertise", "Don't include this address in router advertisements", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                     }
-                                                    ipv6_addr_cfg_meth_nd_p = cli_token_add_token(ctx_p, ipv6_addr_nd_p, "<prefix/prefix-length>", "IPv6 address/prefix-length. Eg: 2001:db8:f101::1/64", CLI_TOKEN_TYPE_VALUE_OTHER, validator_stub);
+                                                    ipv6_addr_cfg_meth_nd_p = cli_token_add_token(ctx_p, ipv6_addr_nd_p, "<prefix/prefix-length>", "IPv6 address/prefix-length. Eg: 2001:db8:f101::1/64", CLI_TOKEN_TYPE_VALUE_IP6ADDR_PLEN, NULL);
                                                     {
                                                         cli_token_add_token(ctx_p, ipv6_addr_cfg_meth_nd_p, "advertise", "Include this address in router advertisements", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                         cli_token_add_token(ctx_p, ipv6_addr_cfg_meth_nd_p, "no-advertise", "Don't include this address in router advertisements", CLI_TOKEN_TYPE_KEYWORD, NULL);
@@ -70,14 +71,10 @@ int main (int argc, char *argv[])
                                                 {
                                                     cli_token_t *ipv6_dhcli_nd_p = cli_token_add_token(ctx_p, ipv6_dhcp_nd_p, "client", "Configure DHCP client parameters", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                     {
-                                                        cli_token_t  *ipv6_pdlen_nd_p;
-
-                                                        cli_token_add_token(ctx_p, ipv6_dhcli_nd_p, "request-prefix-delegation", "Request prefix delegation", CLI_TOKEN_TYPE_KEYWORD, NULL);
-                                                        ipv6_pdlen_nd_p = cli_token_add_token(ctx_p, ipv6_dhcli_nd_p, "delegated-prefix-length", "Delegated Prefix length to request in DHCPv6 PD", CLI_TOKEN_TYPE_KEYWORD, NULL);
+                                                        cli_token_t  *ipv6_pd_nd_p = cli_token_add_token(ctx_p, ipv6_dhcli_nd_p, "request-prefix-delegation", "Request prefix delegation", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                         {
-                                                            cli_token_add_token(ctx_p, ipv6_pdlen_nd_p, "<1-64>", "Prefix length", CLI_TOKEN_TYPE_VALUE_OTHER, validator_stub);
+                                                            cli_token_add_token(ctx_p, ipv6_pd_nd_p, "<1-64>", "Prefix length", CLI_TOKEN_TYPE_VALUE_OTHER, validator_stub);
                                                         }
-                                                        cli_token_add_token(ctx_p, ipv6_dhcli_nd_p, "request-other-info", "Request other information such as Name Servers, NTP Servers", CLI_TOKEN_TYPE_KEYWORD, NULL);
                                                     }
                                                 }
                                             }

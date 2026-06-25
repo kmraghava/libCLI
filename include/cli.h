@@ -39,15 +39,21 @@ extern "C" {
  * Global Types
  *****************************************************************************/
 #define CLI_TOKEN_TYPE_KEYWORD                     0
-#define CLI_TOKEN_TYPE_VALUE_INT                   0x001
-#define CLI_TOKEN_TYPE_VALUE_REAL                  0x002
-#define CLI_TOKEN_TYPE_VALUE_STRING                0x004
-#define CLI_TOKEN_TYPE_VALUE_IPADDR                0x008
-#define CLI_TOKEN_TYPE_VALUE_IPADDR_PLEN           0x010
-#define CLI_TOKEN_TYPE_VALUE_IP4ADDR               0x020
-#define CLI_TOKEN_TYPE_VALUE_IP4ADDR_PLEN          0x040
-#define CLI_TOKEN_TYPE_VALUE_IP6ADDR               0x080
-#define CLI_TOKEN_TYPE_VALUE_IP6ADDR_PLEN          0x100
+#define CLI_TOKEN_TYPE_VALUE_INT                   0x0001
+#define CLI_TOKEN_TYPE_VALUE_HEX                   0x0002
+#define CLI_TOKEN_TYPE_VALUE_REAL                  0x0004
+#define CLI_TOKEN_TYPE_VALUE_STRING                0x0008
+#define CLI_TOKEN_TYPE_VALUE_BOOL                  0x0010
+#define CLI_TOKEN_TYPE_VALUE_IP4ADDR               0x0020
+#define CLI_TOKEN_TYPE_VALUE_IP4ADDR_PLEN          0x0040
+#define CLI_TOKEN_TYPE_VALUE_IP6ADDR               0x0080
+#define CLI_TOKEN_TYPE_VALUE_IP6ADDR_PLEN          0x0100
+#define CLI_TOKEN_TYPE_VALUE_IPADDR                (CLI_TOKEN_TYPE_VALUE_IP4ADDR      | CLI_TOKEN_TYPE_VALUE_IP6ADDR     )
+#define CLI_TOKEN_TYPE_VALUE_IPADDR_PLEN           (CLI_TOKEN_TYPE_VALUE_IP4ADDR_PLEN | CLI_TOKEN_TYPE_VALUE_IP6ADDR_PLEN)
+#define CLI_TOKEN_TYPE_VALUE_FQDN                  0x0200
+#define CLI_TOKEN_TYPE_VALUE_INET_ADDR             (CLI_TOKEN_TYPE_VALUE_IPADDR      | CLI_TOKEN_TYPE_VALUE_FQDN)
+#define CLI_TOKEN_TYPE_VALUE_INET_ADDR_PLEN        (CLI_TOKEN_TYPE_VALUE_IPADDR_PLEN | CLI_TOKEN_TYPE_VALUE_FQDN)
+#define CLI_TOKEN_TYPE_VALUE_MACADDR               0x0400
 
 #define CLI_TOKEN_TYPE_VALUE_OTHER                 0x100000000
 
@@ -56,7 +62,7 @@ typedef struct cli_token_s   cli_token_t;
 typedef struct cli_prompt_s  cli_prompt_t;
 typedef struct cli_context_s cli_context_t;
 
-typedef bool (*cli_validator_f) (cli_context_t *ctx_p, uint64_t value_type, const char *value_p);
+typedef bool (*cli_validator_f) (cli_context_t *ctx_p, uint64_t value_type, string_t *value_p);
 
 
 /*****************************************************************************
