@@ -219,6 +219,7 @@ void cli_cmd_parse (cli_context_t  *ctx_p)
     int           i_tok = 0;
     tree_t       *cmd_tree_p = &ctx_p->cur_prompt_p->cmd_tree;
     cli_token_t  *token_p = NULL;
+    string_t      exit_token_name = { 0L, 4L, "exit" };
 
     cmd_tokens_pp = string_split(in_cmd_p, " ");
     if (!cmd_tokens_pp)
@@ -259,6 +260,21 @@ void cli_cmd_parse (cli_context_t  *ctx_p)
     {
         cli_print(ctx_p, "\n\tIncomplete command\n\n");
         goto RETURN;
+    }
+
+    if (   CLI_TOKEN_TYPE_KEYWORD == token_p->type
+        && 0 == string_compare(token_p->name_p, &exit_token_name, 4, true)
+       )
+    {
+        if (ctx_p->cur_prompt_p == ctx_p->root_prompt_p)
+        {
+            cli_exit(ctx_p);
+        }
+        else
+        {
+            ctx_p->cur_prompt_p = cli_prompt_get_parent_prompt(ctx_p->cur_prompt_p);
+            goto RETURN;
+        }
     }
 
 RETURN:

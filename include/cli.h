@@ -104,7 +104,7 @@ extern cli_prompt_t* cli_token_set_prompt (cli_context_t  *ctx_p,
                                            const char     *name_p);
 
 extern void cli_start (cli_context_t  *ctx_p);
-
+extern void cli_exit  (cli_context_t  *ctx_p);
 
 /*****************************************************************************
    Test Functions

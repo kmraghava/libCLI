@@ -69,7 +69,9 @@ extern cli_token_t* cli_prompt_add_token (cli_context_t    *ctx_p,
                                           const char       *desc_p,
                                           uint64_t          type,
                                           cli_validator_f   cb);
-                                        
+
+extern cli_prompt_t* cli_prompt_get_parent_prompt (cli_prompt_t  *prompt_p);
+
 
 /*****************************************************************************
    Test Functions

@@ -187,8 +187,10 @@ static void cli_run (cli_context_t  *ctx_p)
 /*****************************************************************************
  *
  *  NAME        : cli_start
+ *                cli_exit
  *
  *  DESCRIPTION : Start CLI
+ *                Exit CLI
  *
  *  PARAMS      : ctx_p - CLI context
  *
@@ -225,6 +227,13 @@ void cli_start (cli_context_t  *ctx_p)
     else
     {
     }
+}
+void cli_exit (cli_context_t  *ctx_p)
+{
+    cli_terminal_deinit(ctx_p);
+    cli_line_buffer_deinit(ctx_p);
+
+    exit(0);
 }
 
 

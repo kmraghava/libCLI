@@ -104,6 +104,10 @@ static cli_prompt_t* cli_prompt_new (cli_context_t  *ctx_p,
     if (!prompt_p->history_p)
         goto FATAL;
 
+    /* Add exit token by default to each prompt */
+    if (!cli_prompt_add_token(ctx_p, prompt_p, "exit", "", CLI_TOKEN_TYPE_KEYWORD, NULL))
+        goto FATAL;
+
     return prompt_p;
 
 FATAL:
@@ -316,7 +320,7 @@ cli_prompt_t* cli_context_set_root_prompt (cli_context_t  *ctx_p,
  *  RETURNS     : CLI token that was added
  *
  *****************************************************************************/
-cli_token_t* cli_prompt_add_token (cli_context_t   *ctx_p,
+cli_token_t* cli_prompt_add_token (cli_context_t    *ctx_p,
                                    cli_prompt_t     *parent_p,
                                    const char       *name_p,
                                    const char       *desc_p,
@@ -370,6 +374,35 @@ FATAL:
     if (token_p)      free(token_p);
 
     return NULL;
+}
+
+/*****************************************************************************
+ *
+ *  NAME        : cli_prompt_get_parent_prompt
+ *
+ *  DESCRIPTION : Given a prompt, get its parent prompt
+ *
+ *  PARAMS      : prompt_p - CLI prompt
+ *
+ *  RETURNS     : Parent prompt of given CLI prompt
+ *
+ *****************************************************************************/
+cli_prompt_t* cli_prompt_get_parent_prompt (cli_prompt_t  *prompt_p)
+{
+    cli_prompt_t  *pprompt_p = NULL;
+    cli_token_t   *token_p = prompt_p->parent_p;
+
+    while (   token_p
+           && token_p->pprompt_p == NULL
+          )
+    {
+        token_p = tree_get(token_p->tnode.parent_p->parent_p, cli_token_t, tnode);
+    }
+
+    if (token_p)
+        pprompt_p = token_p->pprompt_p;
+
+    return pprompt_p;
 }
 
 /*****************************************************************************
